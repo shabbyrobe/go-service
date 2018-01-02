@@ -15,6 +15,7 @@ Key features:
 - Service groups (should start and halt together)
 - A WaitGroup implementation with fewer caveats (also it's a bit slower)
 
+It is loosely based on .NET/Java style thread classes.
 
 Here's a quick example (though the
 [godoc](https://godoc.org/github.com/shabbyrobe/golib/service) contains MUCH

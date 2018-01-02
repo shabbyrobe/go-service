@@ -21,14 +21,19 @@ type Group struct {
 	services     []Service
 	haltTimeout  time.Duration
 	readyTimeout time.Duration
+
+	// This is here mainly for testing purposes, so we can swap out
+	// the Runner for a broken one.
+	runnerBuilder func(l Listener) Runner
 }
 
 func NewGroup(name Name, services []Service) *Group {
 	return &Group{
-		name:         name,
-		services:     services,
-		haltTimeout:  GroupHaltTimeout,
-		readyTimeout: GroupReadyTimeout,
+		name:          name,
+		services:      services,
+		haltTimeout:   GroupHaltTimeout,
+		readyTimeout:  GroupReadyTimeout,
+		runnerBuilder: NewRunner,
 	}
 }
 
@@ -54,17 +59,18 @@ func (g *Group) ServiceName() Name {
 
 func (g *Group) Run(ctx Context) error {
 	listener := newGroupListener(len(g.services))
-	runner := NewRunner(listener)
+	runner := g.runnerBuilder(listener)
+
+	var err error
 
 	for _, s := range g.services {
-		if err := runner.Start(s); err != nil {
+		if err = runner.Start(s); err != nil {
 			if herr := runner.HaltAll(g.haltTimeout); herr != nil {
 				return &errGroupHalt{name: g.ServiceName(), haltError: herr, cause: err}
 			}
+			goto done
 		}
 	}
-
-	var err error
 
 	if err = <-runner.WhenReady(g.readyTimeout); err != nil {
 		goto done

@@ -14,8 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/shabbyrobe/golib/errtools"
 )
 
 const (
@@ -33,6 +31,7 @@ var (
 	fuzzSeed      int64
 	fuzzDebugHost string
 	fuzzMetaRolls int64
+	fuzzMetaMin   int
 )
 
 func TestMain(m *testing.M) {
@@ -42,6 +41,7 @@ func TestMain(m *testing.M) {
 	flag.Int64Var(&fuzzSeed, "service.fuzzseed", -1, "Randomise the fuzz tester with this non-negative seed prior to every fuzz test")
 	flag.StringVar(&fuzzDebugHost, "service.debughost", "", "Start a debug server at this host to allow expvars/pprof")
 	flag.Int64Var(&fuzzMetaRolls, "service.fuzzmetarolls", 20, "Re-roll the meta fuzz tester this many times")
+	flag.IntVar(&fuzzMetaMin, "service.fuzzmetamin", 5, "Minimum number of times to run the meta fuzzer regardless of duration")
 	flag.Parse()
 
 	if fuzzDebugHost != "" {
@@ -103,8 +103,9 @@ type listenerCollectorEnd struct {
 type listenerCollectorService struct {
 	errs       []Error
 	states     []State
-	endWaiters []chan struct{}
 	ends       []*listenerCollectorEnd
+	endWaiters []chan struct{}
+	errWaiters []*errWaiter
 }
 
 type listenerCollector struct {
@@ -158,6 +159,36 @@ func (t *listenerCollector) endWaiter(service Service) chan struct{} {
 	return w
 }
 
+type errWaiter struct {
+	C chan error
+}
+
+func (e *errWaiter) Take(n int, timeout time.Duration) []error {
+	out := make([]error, n)
+	for i := 0; i < n; i++ {
+		wait := time.After(timeout)
+		select {
+		case out[i] = <-e.C:
+		case <-wait:
+			panic("errwaiter timeout")
+		}
+	}
+	return out
+}
+
+func (t *listenerCollector) errWaiter(service Service, cap int) *errWaiter {
+	t.lock.Lock()
+	if t.services[service] == nil {
+		t.services[service] = &listenerCollectorService{}
+	}
+	svc := t.services[service]
+	w := &errWaiter{C: make(chan error, cap)}
+	svc.errWaiters = append(svc.errWaiters, w)
+	t.lock.Unlock()
+
+	return w
+}
+
 func (t *listenerCollector) OnServiceState(service Service, state State) {
 	t.lock.Lock()
 	if t.services[service] == nil {
@@ -175,6 +206,12 @@ func (t *listenerCollector) OnServiceError(service Service, err Error) {
 	}
 	svc := t.services[service]
 	svc.errs = append(svc.errs, err)
+
+	if len(svc.errWaiters) > 0 {
+		for _, w := range svc.errWaiters {
+			w.C <- err
+		}
+	}
 	t.lock.Unlock()
 }
 
@@ -186,7 +223,7 @@ func (t *listenerCollector) OnServiceEnd(service Service, err Error) {
 	svc := t.services[service]
 
 	svc.ends = append(svc.ends, &listenerCollectorEnd{
-		err: errtools.Cause(err),
+		err: cause(err),
 	})
 	if len(svc.endWaiters) > 0 {
 		for _, w := range svc.endWaiters {
@@ -384,4 +421,23 @@ func (d *blockingService) Run(ctx Context) error {
 
 	atomic.AddInt32(&d.halts, 1)
 	return d.runFailure
+}
+
+type runnerWithFailingStart struct {
+	Runner
+
+	// start this many services, then fail
+	failAfter int
+
+	err error
+}
+
+func (t *runnerWithFailingStart) Start(service Service) (err error) {
+	if t.failAfter > 0 {
+		err = t.Runner.Start(service)
+		t.failAfter--
+	} else {
+		err = t.err
+	}
+	return
 }

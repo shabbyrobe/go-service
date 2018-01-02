@@ -4,15 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/shabbyrobe/golib/errtools"
 )
 
 type (
 	errWaitTimeout    int
 	errHaltTimeout    int
 	errServiceUnknown int
-	errNotRestartable int
 )
 
 var ErrServiceEnded = errors.New("service ended")
@@ -20,21 +17,19 @@ var ErrServiceEnded = errors.New("service ended")
 func (errWaitTimeout) Error() string    { return "signal wait timeout" }
 func (errHaltTimeout) Error() string    { return "signal halt timeout" }
 func (errServiceUnknown) Error() string { return "service unknown" }
-func (errNotRestartable) Error() string { return "service not restartable" }
 
-func IsErrWaitTimeout(err error) bool    { _, ok := errtools.Cause(err).(errWaitTimeout); return ok }
-func IsErrHaltTimeout(err error) bool    { _, ok := errtools.Cause(err).(errHaltTimeout); return ok }
-func IsErrServiceUnknown(err error) bool { _, ok := errtools.Cause(err).(errServiceUnknown); return ok }
-func IsErrNotRestartable(err error) bool { _, ok := errtools.Cause(err).(errNotRestartable); return ok }
+func IsErrWaitTimeout(err error) bool    { _, ok := cause(err).(errWaitTimeout); return ok }
+func IsErrHaltTimeout(err error) bool    { _, ok := cause(err).(errHaltTimeout); return ok }
+func IsErrServiceUnknown(err error) bool { _, ok := cause(err).(errServiceUnknown); return ok }
 
 func IsErrNotRunning(err error) bool {
-	serr, ok := errtools.Cause(err).(*errState)
+	serr, ok := cause(err).(*errState)
 	return ok && !serr.Current.IsRunning()
 }
 
 type Error interface {
 	error
-	errtools.Causer
+	causer
 	Name() Name
 }
 
@@ -50,7 +45,7 @@ func (s *serviceErrors) Cause() error {
 	if len(s.errors) == 1 {
 		return s.errors[0]
 	} else {
-		return s
+		return nil
 	}
 }
 
@@ -98,4 +93,34 @@ func (e *errState) Error() string {
 	return fmt.Sprintf(
 		"state error: expected %s, found %s when transitioning to %s",
 		e.Expected, e.Current, e.To)
+}
+
+type causer interface {
+	Cause() error
+}
+
+func cause(err error) error {
+	var last = err
+	var rerr = err
+
+	for rerr != nil {
+		cause, ok := rerr.(causer)
+		if !ok {
+			break
+		}
+		rerr = cause.Cause()
+		if rerr == nil {
+			rerr = last
+			break
+		}
+		if rerr == last {
+			break
+		}
+
+		last = rerr
+	}
+	if rerr == nil {
+		rerr = err
+	}
+	return rerr
 }

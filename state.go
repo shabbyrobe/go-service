@@ -1,6 +1,8 @@
 package service
 
-import "sync"
+import (
+	"sync"
+)
 
 type State int
 

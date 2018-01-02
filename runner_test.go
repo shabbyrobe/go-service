@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/shabbyrobe/golib/assert"
-	"github.com/shabbyrobe/golib/errtools"
 )
 
 func mustStateError(tt assert.T, err error, expected State, current State) {
@@ -158,7 +157,7 @@ func TestRunnerStartWaitErrorBeforeReady(t *testing.T) {
 	s1 := &dummyService{startFailure: serr}
 	r := NewRunner(newDummyListener())
 
-	tt.MustEqual(serr, errtools.Cause(r.StartWait(s1, dto)))
+	tt.MustEqual(serr, cause(r.StartWait(s1, dto)))
 	tt.MustOK(<-r.WhenReady(dto))
 }
 
@@ -172,7 +171,7 @@ func TestRunnerStartErrorBeforeReadyIsReturnedByWhenReady(t *testing.T) {
 	r := NewRunner(newDummyListener())
 
 	tt.MustOK(r.Start(s1))
-	tt.MustEqual(serr, errtools.Cause(<-r.WhenReady(dto)))
+	tt.MustEqual(serr, cause(<-r.WhenReady(dto)))
 }
 
 func TestRunnerStartFailureBeforeReady(t *testing.T) {
@@ -185,7 +184,7 @@ func TestRunnerStartFailureBeforeReady(t *testing.T) {
 	r := NewRunner(newDummyListener())
 
 	tt.MustOK(r.Start(s1))
-	tt.MustEqual(serr, errtools.Cause(<-r.WhenReady(dto)))
+	tt.MustEqual(serr, cause(<-r.WhenReady(dto)))
 }
 
 func TestRunnerStartWaitServiceEndsAfterReady(t *testing.T) {
@@ -213,7 +212,7 @@ func TestRunnerStartWaitServiceEndsBeforeReady(t *testing.T) {
 	lc := newListenerCollector()
 	r := NewRunner(lc)
 
-	tt.MustEqual(e1, errtools.Cause(r.StartWait(s1, dto)))
+	tt.MustEqual(e1, cause(r.StartWait(s1, dto)))
 }
 
 func TestRunnerStartFirstThenStartSecondAfterFirstEnds(t *testing.T) {
@@ -419,48 +418,58 @@ func TestHaltableSleep(t *testing.T) {
 }
 
 func TestRunnerOnError(t *testing.T) {
+	// FIXME: this test is brittle and terrible. it has been hacked on until
+	// it passes but it should be rewritten.
 	t.Parallel()
 
 	tt := assert.WrapTB(t)
 
-	var s1StartTime, s2StartTime, runTime time.Duration = 4, 6, 10
-	var s1Tick, s2Tick time.Duration = 2, 3
-	s1Expected := int((s1StartTime+runTime)/s1Tick) - 1
-	s2Expected := int((s2StartTime+runTime)/s2Tick) - 1
+	var s1StartTime, s2StartTime time.Duration = 4 * tscale, 6 * tscale
+	var s1Tick, s2Tick time.Duration = 2 * tscale, 3 * tscale
+	s1Expected, s2Expected := 4, 3
+	var s1RunTime = s1StartTime + (s1Tick * time.Duration(s1Expected))
+	var s2RunTime = s2StartTime + (s2Tick * time.Duration(s2Expected))
+	var runTime = s1RunTime
+	if s2RunTime > runTime {
+		runTime = s2RunTime
+	}
 
-	s1 := (&errorService{startDelay: s1StartTime * tscale}).Init()
-	s2 := (&errorService{startDelay: s2StartTime * tscale}).Init()
+	s1 := (&errorService{startDelay: s1StartTime}).Init()
+	s2 := (&errorService{startDelay: s2StartTime}).Init()
 
-	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
-		t1 := time.NewTicker(s1Tick * tscale)
-		t2 := time.NewTicker(s2Tick * tscale)
-		for {
+		t1 := time.NewTicker(s1Tick)
+		t2 := time.NewTicker(s2Tick)
+		s1Cnt, s2Cnt := 0, 0
+		for s1Cnt < s1Expected || s2Cnt < s2Expected {
 			select {
 			case t := <-t1.C:
-				s1.errc <- fmt.Errorf("s1: %v", t)
+				if s1Cnt < s1Expected {
+					s1.errc <- fmt.Errorf("s1: %v", t)
+					s1Cnt++
+				}
 			case t := <-t2.C:
-				s2.errc <- fmt.Errorf("s2: %v", t)
-			case <-done:
-				close(stop)
-				return
+				if s2Cnt < s2Expected {
+					s2.errc <- fmt.Errorf("s2: %v", t)
+					s2Cnt++
+				}
 			}
 		}
 	}()
 
 	lc := newListenerCollector()
+	ew1, ew2 := lc.errWaiter(s1, s1Expected), lc.errWaiter(s2, s2Expected)
 	r := NewRunner(lc)
 	tt.MustOK(r.Start(s1))
 	tt.MustOK(r.Start(s2))
-	tt.MustOK(<-r.WhenReady(dto))
+	tt.MustOK(<-r.WhenReady(100 * tscale))
 
-	time.Sleep(runTime * tscale) // let a few more errors accumulate
+	s1Errs := ew1.Take(s1Expected, 10*runTime)
+	s2Errs := ew2.Take(s2Expected, 10*runTime)
 	tt.MustOK(r.HaltAll(dto))
-	close(done)
-	<-stop
 
-	tt.MustAssert(len(lc.errs(s1)) >= s1Expected)
-	tt.MustAssert(len(lc.errs(s2)) >= s2Expected)
+	tt.MustAssert(len(s1Errs) >= s1Expected)
+	tt.MustAssert(len(s2Errs) >= s2Expected)
 }
 
 func TestRunnerHaltAll(t *testing.T) {

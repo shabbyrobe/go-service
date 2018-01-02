@@ -2,10 +2,10 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/shabbyrobe/golib/assert"
-	"github.com/shabbyrobe/golib/errtools"
 )
 
 func assertStartHaltCount(tt assert.T, scnt, hcnt int, ss ...statService) {
@@ -65,7 +65,7 @@ func TestGroupOneFailsBeforeReady(t *testing.T) {
 	r := NewRunner(lc)
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
-	tt.MustEqual(e1, errtools.Cause(r.StartWait(g, dto)))
+	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
 	defer MustEnsureHalt(r, g, dto)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
@@ -155,4 +155,95 @@ func TestGroupRunTwice(t *testing.T) {
 	tt.MustOK(r2.Halt(g, dto))
 
 	assertStartHaltCount(tt, 2, 2, s1, s2)
+}
+
+func TestGroupStartError(t *testing.T) {
+	tt := assert.WrapTB(t)
+
+	e1 := errors.New("start failure")
+
+	s1 := (&blockingService{}).Init()
+	s2 := (&blockingService{}).Init()
+	s3 := &dummyService{startFailure: e1}
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+	g := NewGroup("yep", []Service{s1, s2, s3})
+
+	ew := lc.endWaiter(g)
+	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
+
+	assertStartHaltCount(tt, 1, 1, s1, s2)
+	assertStartHaltCount(tt, 1, 0, s3)
+
+	<-ew
+	tt.MustEqual(1, len(lc.ends(g)))
+
+	tt.MustEqual(Halted, r.State(g))
+}
+
+func TestGroupRunnerError(t *testing.T) {
+	tt := assert.WrapTB(t)
+
+	e1 := errors.New("start failure")
+
+	s1 := (&blockingService{}).Init()
+	s2 := (&blockingService{}).Init()
+	s3 := (&blockingService{}).Init()
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+	g := NewGroup("yep", []Service{s1, s2, s3})
+
+	g.runnerBuilder = func(l Listener) Runner {
+		return &runnerWithFailingStart{
+			failAfter: 2,
+			err:       e1,
+			Runner:    NewRunner(l),
+		}
+	}
+
+	ew := lc.endWaiter(g)
+	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
+
+	assertStartHaltCount(tt, 1, 1, s1, s2)
+	assertStartHaltCount(tt, 0, 0, s3)
+
+	<-ew
+	tt.MustEqual(1, len(lc.ends(g)))
+
+	tt.MustEqual(Halted, r.State(g))
+}
+
+func TestGroupOnError(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	s1 := (&errorService{}).Init()
+	s2 := (&errorService{}).Init()
+
+	expected := 3 // at least this many errors should occur
+
+	go func() {
+		for i := 0; i < expected; i++ {
+			s1.errc <- fmt.Errorf("s1: %d", i)
+			s2.errc <- fmt.Errorf("s2: %d", i)
+		}
+	}()
+
+	lc := newListenerCollector()
+	ew1, ew2 := lc.errWaiter(s1, expected), lc.errWaiter(s2, expected)
+
+	r := NewRunner(lc)
+	tt.MustOK(r.Start(s1))
+	tt.MustOK(r.Start(s2))
+	tt.MustOK(<-r.WhenReady(dto))
+
+	s1errs := ew1.Take(expected, tscale*10)
+	s2errs := ew2.Take(expected, tscale*10)
+	tt.MustOK(r.HaltAll(dto))
+
+	tt.MustAssert(len(s1errs) >= expected, "%d < %d", s1errs, expected)
+	tt.MustAssert(len(s2errs) >= expected, "%d < %d", s2errs, expected)
 }
