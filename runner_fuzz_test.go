@@ -245,6 +245,10 @@ func TestRunnerFuzzGroupOutrage(t *testing.T) {
 }
 
 func TestRunnerMetaFuzzInsanity(t *testing.T) {
+	if !fuzzEnabled {
+		t.Skip("skipping fuzz test")
+	}
+
 	// OK, we've fuzzed the Runner. Now let's fuzz fuzzing the runner.
 	//            ,--.!,       ,--.!,       ,--.!,       ,--.!,
 	//         __/   -*-    __/   -*-    __/   -*-    __/   -*-
