@@ -8,12 +8,22 @@ const MinHaltableSleep = 50 * time.Millisecond
 // that the service is ready, to receive the signal to halt or to relay
 // non-fatal errors to the Runner's listener.
 type Context interface {
+	// Halt returns a channel which will be closed when the service should
+	// halt. All services should either include this channel in their select
+	// loop, or regularly poll Halted().
 	Halt() <-chan struct{}
+
+	// Halted returns true if the service has been instructed to halt by
+	// its runner. All services should either regularly poll this, or
+	// include Halt() in their select loop.
 	Halted() bool
+
+	// Ready MUST be called by all services when they have finished
+	// their setup routines and are considered "Ready" to run.
 	Ready() error
 
-	// OnError is used to report a non-fatal error that does not cause
-	// the service to halt prematurely to the Listener.
+	// OnError is used to pass all non-fatal errors that do not cause the
+	// service to halt prematurely up to the runner's listener.
 	OnError(err error)
 }
 

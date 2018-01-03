@@ -17,7 +17,7 @@ func TestStateChangerThen(t *testing.T) {
 	)
 
 	tt := assert.WrapTB(t)
-	sc := NewStateChanger()
+	sc := newStateChanger()
 
 	fns := []func(then func(err error) error) (err error){
 		sc.SetStarted, sc.SetHalted, sc.SetHalting,
@@ -55,7 +55,7 @@ func TestStateChangerErrorPassthrough(t *testing.T) {
 	for _, then := range thenners {
 		for from, tos := range matrix {
 			for to, success := range tos {
-				sc := &StateChanger{state: from}
+				sc := &stateChanger{state: from}
 				var result error
 				switch to {
 				case Halted:

@@ -522,7 +522,7 @@ func TestRunnerServiceFunc(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	ready := make(chan struct{})
-	s1 := ServiceFunc("test", func(ctx Context) error {
+	s1 := Func("test", func(ctx Context) error {
 		<-ready
 		if err := ctx.Ready(); err != nil {
 			return err

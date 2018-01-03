@@ -53,9 +53,7 @@ func (l *groupListener) OnServiceError(service Service, err Error)   { l.errs <-
 func (l *groupListener) OnServiceEnd(service Service, err Error)     { l.ends <- err }
 func (l *groupListener) OnServiceState(service Service, state State) {}
 
-func (g *Group) ServiceName() Name {
-	return g.name
-}
+func (g *Group) ServiceName() Name { return g.name }
 
 func (g *Group) Run(ctx Context) error {
 	listener := newGroupListener(len(g.services))

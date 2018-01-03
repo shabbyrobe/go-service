@@ -46,6 +46,8 @@ func State(s service.Service) service.State {
 // which will allow the caller to respond to errors and service ends.
 //
 // Listeners can be used multiple times when starting different services.
+//
+// See github.com/shabbyrobe/go-service.Runner for more documentation.
 func StartWait(s service.Service, l service.Listener, timeout time.Duration) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -61,6 +63,8 @@ func StartWait(s service.Service, l service.Listener, timeout time.Duration) err
 // which will allow the caller to respond to errors and service ends.
 //
 // Listeners can be used multiple times when starting different services.
+//
+// See github.com/shabbyrobe/go-service.Runner for more documentation.
 func Start(s service.Service, l service.Listener) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -70,6 +74,9 @@ func Start(s service.Service, l service.Listener) error {
 	return runner.Start(s)
 }
 
+// Halt halts a service in the global runner.
+//
+// See github.com/shabbyrobe/go-service.Runner for more documentation.
 func Halt(s service.Service, timeout time.Duration) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -77,6 +84,9 @@ func Halt(s service.Service, timeout time.Duration) error {
 	return runner.Halt(s, timeout)
 }
 
+// HaltAll halts all services in the global runner.
+//
+// See github.com/shabbyrobe/go-service.Runner for more documentation.
 func HaltAll(timeout time.Duration) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -84,6 +94,9 @@ func HaltAll(timeout time.Duration) error {
 	return runner.HaltAll(timeout)
 }
 
+// Services halts all services in the global runner.
+//
+// See github.com/shabbyrobe/go-service.Runner for more documentation.
 func Services(state service.State) []service.Service {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -91,6 +104,8 @@ func Services(state service.State) []service.Service {
 	return runner.Services(state)
 }
 
+// Unregister unregisters a service from the global runner. Only a halted
+// service can be unregistered.
 func Unregister(s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -99,6 +114,7 @@ func Unregister(s service.Service) error {
 	return runner.Unregister(s)
 }
 
+// WhenReady waits until all services in the global runner have started.
 func WhenReady(timeout time.Duration) <-chan error {
 	lock.RLock()
 	defer lock.RUnlock()

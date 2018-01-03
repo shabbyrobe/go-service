@@ -37,26 +37,26 @@ const (
 	Running = Starting | Started
 )
 
-type StateChanger struct {
+type stateChanger struct {
 	state State
 	lock  sync.RWMutex
 }
 
-func NewStateChanger() *StateChanger {
-	return &StateChanger{state: Halted}
+func newStateChanger() *stateChanger {
+	return &stateChanger{state: Halted}
 }
 
-func (s *StateChanger) State() State {
+func (s *stateChanger) State() State {
 	s.lock.RLock()
 	ret := s.state
 	s.lock.RUnlock()
 	return ret
 }
 
-func (s *StateChanger) Lock()   { s.lock.Lock() }
-func (s *StateChanger) Unlock() { s.lock.Unlock() }
+func (s *stateChanger) Lock()   { s.lock.Lock() }
+func (s *stateChanger) Unlock() { s.lock.Unlock() }
 
-func (s *StateChanger) SetHalting(then func(err error) error) (err error) {
+func (s *stateChanger) SetHalting(then func(err error) error) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -71,7 +71,7 @@ func (s *StateChanger) SetHalting(then func(err error) error) (err error) {
 	return
 }
 
-func (s *StateChanger) SetStarting(then func(err error) error) (err error) {
+func (s *stateChanger) SetStarting(then func(err error) error) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -86,7 +86,7 @@ func (s *StateChanger) SetStarting(then func(err error) error) (err error) {
 	return
 }
 
-func (s *StateChanger) SetStarted(then func(err error) error) (err error) {
+func (s *stateChanger) SetStarted(then func(err error) error) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -101,7 +101,7 @@ func (s *StateChanger) SetStarted(then func(err error) error) (err error) {
 	return
 }
 
-func (s *StateChanger) SetHalted(then func(err error) error) (err error) {
+func (s *stateChanger) SetHalted(then func(err error) error) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 

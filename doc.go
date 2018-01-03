@@ -95,10 +95,10 @@ Here is an example of a Run() method which sleeps:
 		return nil
 	}
 
-ServiceFunc allows you to use a bare function as a Service instead of
+service.Func allows you to use a bare function as a Service instead of
 implementing the Service interface:
 
-	service.ServiceFunc("My service", func(ctx service.Context) error {
+	service.Func("My service", func(ctx service.Context) error {
 		// valid Run implementation
 	})
 

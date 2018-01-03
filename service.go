@@ -23,7 +23,7 @@ type serviceFunc struct {
 	fn   func(ctx Context) error
 }
 
-func ServiceFunc(name Name, fn func(ctx Context) error) Service {
+func Func(name Name, fn func(ctx Context) error) Service {
 	return &serviceFunc{name: name, fn: fn}
 }
 

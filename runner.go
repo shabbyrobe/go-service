@@ -16,20 +16,28 @@ type Runner interface {
 	// until Unregister is called even if the service is Halted.
 	Start(s Service) error
 
+	// Halt a service started in this runner. The runner will retain a
+	// reference to it until Unregister is called.
 	Halt(s Service, timeout time.Duration) error
+
+	// HaltAll halts all services started in this runner. The runner will retain
+	// references to the services until Unregister is called.
 	HaltAll(timeout time.Duration) error
 
-	// List of services currently registered at the time of the call.
-	// If State is provided, only services matching the state are returned.
+	// Services returns a list of services currently registered at the time of
+	// the call. If State is provided, only services matching the state are
+	// returned.
 	Services(state State) []Service
 
+	// Unregister unregisters a service that has been started and halted in this runner.
 	// If you start a service, the runner will retain a reference to it until
 	// Unregister is called.
 	Unregister(s Service) error
 
-	// Wait returns a channel which will emit an error if one occurs during
+	// WhenReady returns a channel which will emit an error if one occurs during
 	// startup, an error if the timeout duration elapses before Context.Ready()
 	// is called, or nil if the service has Started().
+	//
 	// If there is nothing to Wait for (i.e. the internal wait group's counter
 	// is 0), the channel will return nil immediately.
 	WhenReady(timeout time.Duration) <-chan error
@@ -88,7 +96,7 @@ func MustEnsureHalt(r Runner, s Service, timeout time.Duration) {
 }
 
 type runnerState struct {
-	changer        *StateChanger
+	changer        *stateChanger
 	startingCalled int32
 	readyCalled    int32
 	halt           chan struct{}
@@ -276,7 +284,7 @@ func (r *runner) Starting(service Service) error {
 	defer r.statesLock.Unlock()
 	if r.states[service] == nil {
 		r.states[service] = &runnerState{
-			changer: NewStateChanger(),
+			changer: newStateChanger(),
 		}
 	} else {
 		r.states[service].SetReadyCalled(false)

@@ -12,6 +12,8 @@ type (
 	errServiceUnknown int
 )
 
+// ErrServiceEnded is a sentinel error used to indicate that a service
+// ended prematurely but no obvious error that could be returned.
 var ErrServiceEnded = errors.New("service ended")
 
 func (errWaitTimeout) Error() string    { return "signal wait timeout" }
@@ -31,6 +33,13 @@ type Error interface {
 	error
 	causer
 	Name() Name
+}
+
+func WrapError(err error, svc Service) Error {
+	if err == nil {
+		return nil
+	}
+	return &serviceError{cause: err, name: svc.ServiceName()}
 }
 
 type errorGroup interface {
@@ -76,13 +85,6 @@ func (s *serviceError) Name() Name   { return s.name }
 
 func (s *serviceError) Error() string {
 	return fmt.Sprintf("service %s error: %v", s.name, s.cause)
-}
-
-func WrapError(err error, svc Service) Error {
-	if err == nil {
-		return nil
-	}
-	return &serviceError{cause: err, name: svc.ServiceName()}
 }
 
 type errState struct {
