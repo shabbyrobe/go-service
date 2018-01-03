@@ -77,8 +77,8 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if code == 0 {
-		// This little hack is to give things like "go OnServiceState" a chance
-		// to finish - it routinely shows up in the profile
+		// This little hack gives things like "go OnServiceState" a chance to
+		// finish - it routinely shows up in the profile
 		time.Sleep(20 * time.Millisecond)
 
 		after := pprof.Lookup("goroutine")
@@ -241,14 +241,11 @@ func newDummyListener() *dummyListener {
 	return &dummyListener{}
 }
 
-func (t *dummyListener) OnServiceState(service Service, state State) {
-}
+func (t *dummyListener) OnServiceState(service Service, state State) {}
 
-func (t *dummyListener) OnServiceError(service Service, err Error) {
-}
+func (t *dummyListener) OnServiceError(service Service, err Error) {}
 
-func (t *dummyListener) OnServiceEnd(service Service, err Error) {
-}
+func (t *dummyListener) OnServiceEnd(service Service, err Error) {}
 
 type statService interface {
 	ServiceName() Name

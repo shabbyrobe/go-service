@@ -82,6 +82,9 @@ func TestRunnerStart(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
+	// FIXME: Must delay start enough to allow Starting state to be checked.
+	// This is a brittle test - we could use OnServiceState to help block
+	// the service until Starting has been checked.
 	s1 := (&blockingService{startDelay: 2 * tscale}).Init()
 	r := NewRunner(newDummyListener())
 
@@ -90,7 +93,10 @@ func TestRunnerStart(t *testing.T) {
 	mustStateError(tt, r.Start(s1), Halted, Starting)
 
 	tt.MustOK(<-r.WhenReady(dto))
+	tt.MustAssert(r.State(s1) == Started)
+
 	tt.MustOK(r.Halt(s1, dto))
+	tt.MustAssert(r.State(s1) == Halted)
 }
 
 func TestRunnerSameServiceMultipleRunners(t *testing.T) {

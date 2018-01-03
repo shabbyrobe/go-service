@@ -75,14 +75,14 @@ func EnsureHalt(r Runner, s Service, timeout time.Duration) error {
 // MustEnsureHalt allows Runner.Halt() to be called in a defer, but only if
 // it is acceptable to crash the server if the service does not Halt.
 // EnsureHalt is used to prevent an error if the service is already halted.
-func MustEnsureHalt(r Runner, service Service, timeout time.Duration) {
-	if service == nil {
+func MustEnsureHalt(r Runner, s Service, timeout time.Duration) {
+	if s == nil {
 		return
 	}
 	if timeout <= 0 {
 		panic(fmt.Errorf("service: MustHalt timeout must be > 0"))
 	}
-	if err := EnsureHalt(r, service, timeout); err != nil {
+	if err := EnsureHalt(r, s, timeout); err != nil {
 		panic(err)
 	}
 }
