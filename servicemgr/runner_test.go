@@ -27,7 +27,7 @@ func TestStart(t *testing.T) {
 	tt.MustOK(Start(s1, nil))
 	tt.MustAssert(State(s1) == service.Starting)
 
-	tt.MustOK(<-WhenReady(dto))
+	tt.MustOK(WhenReady(s1, dto))
 	tt.MustAssert(State(s1) == service.Started)
 
 	tt.MustOK(Halt(s1, dto))
@@ -43,7 +43,7 @@ func TestStartWait(t *testing.T) {
 
 	tt.MustOK(StartWait(s1, nil, 10*tscale))
 	tt.MustAssert(State(s1) == service.Started)
-	tt.MustOK(<-WhenReady(dto))
+	tt.MustOK(WhenReady(s1, dto))
 
 	tt.MustOK(Halt(s1, dto))
 	tt.MustAssert(State(s1) == service.Halted)

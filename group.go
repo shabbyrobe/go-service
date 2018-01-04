@@ -70,7 +70,7 @@ func (g *Group) Run(ctx Context) error {
 		}
 	}
 
-	if err = <-runner.WhenReady(g.readyTimeout); err != nil {
+	if err = WhenAllReady(runner, g.readyTimeout, g.services...); err != nil {
 		goto done
 	}
 	if err = ctx.Ready(); err != nil {

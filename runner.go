@@ -34,13 +34,18 @@ type Runner interface {
 	// Unregister is called.
 	Unregister(s Service) error
 
-	// WhenReady returns a channel which will emit an error if one occurs during
-	// startup, an error if the timeout duration elapses before Context.Ready()
-	// is called, or nil if the service has Started().
+	// WhenReady blocks until the service is ready or an error occurs.
+	// It will unblock when one of the following conditions is met:
 	//
-	// If there is nothing to Wait for (i.e. the internal wait group's counter
-	// is 0), the channel will return nil immediately.
-	WhenReady(timeout time.Duration) <-chan error
+	//  - The service's state is not Starting
+	//	- The service calls ctx.Ready()
+	//	- The service returns before calling ctx.Ready()
+	//	- The service is halted before callig ctx.Ready()
+	//	- The timeout elapses
+	//
+	// It returns nil if ctx.Ready() was successfully called, and an error in
+	// all other cases.
+	WhenReady(s Service, timeout time.Duration) error
 }
 
 // Listener allows you to respond to events raised by the Runner in the
@@ -95,10 +100,24 @@ func MustEnsureHalt(r Runner, s Service, timeout time.Duration) {
 	}
 }
 
+func WhenAllReady(r Runner, timeout time.Duration, ss ...Service) error {
+	var errs []error
+	for _, s := range ss {
+		if err := r.WhenReady(s, timeout); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return &serviceErrors{errors: errs}
+	}
+	return nil
+}
+
 type runnerState struct {
 	changer        *stateChanger
 	startingCalled int32
 	readyCalled    int32
+	ready          chan error
 	halt           chan struct{}
 	halted         chan struct{}
 }
@@ -122,10 +141,6 @@ func (r *runnerState) SetReadyCalled(v bool) {
 }
 
 type runner struct {
-	// sync.WaitGroup is not adequate for this job as we may call wg.Add() before
-	// all wg.Wait() calls have returned.
-	wg *errQueue
-
 	listener Listener
 
 	states     map[Service]*runnerState
@@ -136,7 +151,6 @@ func NewRunner(listener Listener) Runner {
 	return &runner{
 		listener: listener,
 		states:   make(map[Service]*runnerState),
-		wg:       newErrQueue(),
 	}
 }
 
@@ -169,11 +183,7 @@ func (r *runner) StartWait(service Service, timeout time.Duration) (err error) {
 		return err
 	}
 
-	select {
-	case err = <-r.WhenReady(timeout):
-	}
-
-	return
+	return r.WhenReady(service, timeout)
 }
 
 func (r *runner) Start(service Service) (err error) {
@@ -189,6 +199,7 @@ func (r *runner) Start(service Service) (err error) {
 		startingCalled, readyCalled := rs.StartingCalled(), rs.ReadyCalled()
 		wasStarted := err != nil
 
+		ready := rs.ready
 		if wasStarted {
 			if rerr := r.ended(service); rerr != nil {
 				panic(rerr)
@@ -203,7 +214,8 @@ func (r *runner) Start(service Service) (err error) {
 		if !readyCalled && startingCalled {
 			// If the service ended while it was starting, Ready() will never
 			// be called.
-			r.wg.Put(&serviceError{name: service.ServiceName(), cause: err})
+			ready <- &serviceError{name: service.ServiceName(), cause: err}
+			close(ready)
 		}
 	}()
 
@@ -282,24 +294,26 @@ func (r *runner) HaltAll(timeout time.Duration) error {
 func (r *runner) Starting(service Service) error {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
-	if r.states[service] == nil {
-		r.states[service] = &runnerState{
+
+	var svc = r.states[service]
+	if svc == nil {
+		svc = &runnerState{
 			changer: newStateChanger(),
 		}
+		r.states[service] = svc
 	} else {
-		r.states[service].SetReadyCalled(false)
-		r.states[service].SetStartingCalled(false)
+		svc.SetReadyCalled(false)
+		svc.SetStartingCalled(false)
 	}
 
-	svc := r.states[service]
 	if err := svc.changer.SetStarting(nil); err != nil {
 		return err
 	}
-	r.states[service].SetStartingCalled(true)
+
+	svc.SetStartingCalled(true)
+	svc.ready = make(chan error, 1)
 	svc.halt = make(chan struct{})
 	svc.halted = make(chan struct{})
-
-	r.wg.Add(1)
 
 	if r.listener != nil {
 		go r.listener.OnServiceState(service, Starting)
@@ -320,11 +334,13 @@ func (r *runner) Ready(service Service) error {
 		return errServiceUnknown(0)
 	}
 
-	r.states[service].SetReadyCalled(true)
-	r.wg.Put(nil)
+	rs := r.states[service]
+	rs.SetReadyCalled(true)
+	rs.ready <- nil
+	close(rs.ready)
 
 	var serr *errState
-	if err := r.states[service].changer.SetStarted(nil); err != nil {
+	if err := rs.changer.SetStarted(nil); err != nil {
 		var ok bool
 		if serr, ok = err.(*errState); ok {
 			// State errors don't matter here -
@@ -418,50 +434,34 @@ func (r *runner) Unregister(service Service) error {
 	return nil
 }
 
-func (r *runner) WhenReady(limit time.Duration) <-chan error {
-	var wait <-chan time.Time
-	var stop chan struct{}
+func (r *runner) WhenReady(service Service, limit time.Duration) error {
+	errc, err := func() (chan error, error) {
+		r.statesLock.Lock()
+		defer r.statesLock.Unlock()
 
-	if limit > 0 {
-		wait = time.After(limit)
-		stop = make(chan struct{})
-	}
-
-	out := make(chan error, 1)
-	var closed int32
-	go func() {
-		var err error
-
-		errs := r.wg.Wait()
-		if len(errs) == 1 {
-			err = errs[0]
-		} else if len(errs) > 1 {
-			err = &serviceErrors{errors: errs}
+		rs := r.states[service]
+		if rs == nil {
+			return nil, errServiceUnknown(0)
 		}
-
-		if atomic.CompareAndSwapInt32(&closed, 0, 1) {
-			if stop != nil {
-				close(stop)
-			}
-			out <- err
-			close(out)
-		}
+		return rs.ready, nil
 	}()
 
-	if wait != nil {
-		go func() {
-			select {
-			case <-stop:
-				// This cleans up the goroutine if we return before the timeout
-			case <-wait:
-				if atomic.CompareAndSwapInt32(&closed, 0, 1) {
-					atomic.StoreInt32(&closed, 1)
-					out <- errWaitTimeout(0)
-					close(out)
-				}
-			}
-		}()
+	if err != nil {
+		return err
+	}
+	if errc == nil {
+		return nil
 	}
 
-	return out
+	var wait <-chan time.Time
+	if limit > 0 {
+		wait = time.After(limit)
+	}
+
+	select {
+	case <-wait:
+		return errWaitTimeout(0)
+	case err := <-errc:
+		return err
+	}
 }

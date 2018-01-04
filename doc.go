@@ -107,21 +107,29 @@ Runners
 
 To start or halt a service, a Runner is required.
 
-	r := NewRunner(nil)
+	r := service.NewRunner(nil)
+	svc1, svc2 := &MyService{}, &MyService{}
 
 	// start, but don't wait until the service is ready:
-	err := r.Start(&MyService{})
+	err := r.Start(svc1)
 
 	// start another one and also don't wait:
-	err := r.Start(&MyService{})
+	err := r.Start(svc2)
 
-	// wait no more than 1 second for both services to become ready
-	err := <-r.WhenReady(1 * time.Second)
+	// wait no more than 1 second each for both services to become ready (if
+	// there are 2 services, the maximum timeout will be 2 seconds)
+	err := service.WhenAllReady(1 * time.Second, svc1, svc2)
 
-	// start another service, but this time wait no more than 1 second
-	// until it's ready before returning:
+	// start another service and wait no more than 1 second until it's ready
+	// before returning:
 	svc := &MyService{}
 	err := r.StartWait(svc, 1 * time.Second)
+
+	// the above StartWait call is equivalent to the following (error handling
+	// skipped for brevity):
+	svc := &MyService{}
+	err := r.Start(svc)
+	err := r.WhenReady(svc, 1 * time.Second)
 
 	// now halt the service we just started, waiting no more than 1 second
 	// for the service to end:

@@ -238,7 +238,7 @@ func TestGroupOnError(t *testing.T) {
 	r := NewRunner(lc)
 	tt.MustOK(r.Start(s1))
 	tt.MustOK(r.Start(s2))
-	tt.MustOK(<-r.WhenReady(dto))
+	tt.MustOK(WhenAllReady(r, dto, s1, s2))
 
 	s1errs := ew1.Take(expected, tscale*10)
 	s2errs := ew2.Take(expected, tscale*10)

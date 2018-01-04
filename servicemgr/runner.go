@@ -114,12 +114,20 @@ func Unregister(s service.Service) error {
 	return runner.Unregister(s)
 }
 
-// WhenReady waits until all services in the global runner have started.
-func WhenReady(timeout time.Duration) <-chan error {
+// WhenReady waits until a service in the global runner has started.
+func WhenReady(s service.Service, timeout time.Duration) error {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return runner.WhenReady(timeout)
+	return runner.WhenReady(s, timeout)
+}
+
+// WhenAllReady waits until all services in the global runner have started.
+func WhenAllReady(timeout time.Duration, ss ...service.Service) error {
+	lock.RLock()
+	defer lock.RUnlock()
+
+	return service.WhenAllReady(runner, timeout, ss...)
 }
 
 func EnsureHalt(s service.Service, timeout time.Duration) error {

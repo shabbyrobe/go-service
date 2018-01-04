@@ -19,9 +19,11 @@ import (
 // TODO:
 // - should attempt to restart certain services
 // - runnerWithFailingStart chance
+// - should randomly call WhenReady on an existing service regardless of its state
 
 func TestRunnerFuzzEverythingHappy(t *testing.T) {
 	// Happy config: should yield no errors
+	stats := NewStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
 		RunnerCreateChance: 0.01,
@@ -49,8 +51,17 @@ func TestRunnerFuzzEverythingHappy(t *testing.T) {
 
 		StateCheckChance: 0.2,
 
-		Stats: NewStats(),
+		Stats: stats,
 	})
+
+	tt := assert.WrapTB(t)
+	for _, s := range []*ServiceStats{stats.ServiceStats, stats.GroupStats} {
+		tt.MustEqual(0, s.GetServiceHaltFailed())
+		tt.MustEqual(0, s.GetServiceStartFailed())
+		tt.MustEqual(0, s.GetServiceStartWaitFailed())
+		tt.MustEqual(0, s.GetServiceUnregisterHaltFailed())
+		tt.MustEqual(0, s.GetServiceUnregisterUnexpectedFailed())
+	}
 }
 
 func TestRunnerFuzzServiceHappy(t *testing.T) {
@@ -757,6 +768,7 @@ func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 }
 
 type Stats struct {
+	Duration       time.Duration
 	Seed           int64
 	Tick           int32
 	RunnersStarted int32
@@ -771,6 +783,7 @@ type Stats struct {
 
 	GroupSizes     map[int]int
 	groupSizesLock sync.Mutex
+	start          time.Time
 }
 
 func NewStats() *Stats {
@@ -792,6 +805,7 @@ func (s *Stats) StatsForService(svc Service) *ServiceStats {
 }
 
 func (s *Stats) Start() {
+	s.start = time.Now()
 	atomic.StoreInt32(&s.RunnersCurrent, 0)
 	atomic.StoreInt32(&s.Tick, 0)
 }
@@ -822,6 +836,7 @@ func (s *Stats) AddStateCheckResult(state State) {
 
 func (s *Stats) Clone() *Stats {
 	n := NewStats()
+	n.Duration = time.Since(s.start)
 	n.Seed = s.Seed
 	n.Tick = int32(s.GetTick())
 	n.RunnersCurrent = int32(s.GetRunnersCurrent())

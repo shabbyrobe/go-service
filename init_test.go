@@ -365,6 +365,33 @@ func (d *errorService) Run(ctx Context) error {
 	}
 }
 
+type unhaltableService struct {
+	halt chan error
+	name Name
+	init bool
+}
+
+func (u *unhaltableService) Init() *unhaltableService {
+	u.init = true
+	if u.name == "" {
+		u.name.AppendUnique()
+	}
+	u.halt = make(chan error)
+	return u
+}
+
+func (u *unhaltableService) ServiceName() Name { return u.name }
+
+func (u *unhaltableService) Run(ctx Context) error {
+	if !u.init {
+		panic("call Init()!")
+	}
+	if err := ctx.Ready(); err != nil {
+		return err
+	}
+	return <-u.halt
+}
+
 type blockingService struct {
 	name         Name
 	startFailure error
@@ -381,16 +408,13 @@ func (d *blockingService) Halts() int  { return int(atomic.LoadInt32(&d.halts)) 
 
 func (d *blockingService) Init() *blockingService {
 	d.init = true
+	if d.name == "" {
+		d.name.AppendUnique()
+	}
 	return d
 }
 
-func (d *blockingService) ServiceName() Name {
-	if d.name == "" {
-		// This is a nasty cheat, don't do it in any real code!
-		return Name(fmt.Sprintf("blockingService-%p", d))
-	}
-	return d.name
-}
+func (d *blockingService) ServiceName() Name { return d.name }
 
 func (d *blockingService) Run(ctx Context) error {
 	// defer fmt.Println("dummy ENDED", d.ServiceName())
