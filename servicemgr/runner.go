@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	listener *listenerDispatcher
-	runner   service.Runner
-	lock     sync.RWMutex
+	listener        *listenerDispatcher
+	defaultListener service.Listener
+	runner          service.Runner
+	lock            sync.RWMutex
 )
 
 func init() {
@@ -29,8 +30,16 @@ func Runner() service.Runner {
 func Reset() {
 	lock.Lock()
 	listener = newListenerDispatcher()
+	listener.SetDefaultListener(defaultListener)
 	runner = service.NewRunner(listener)
 	lock.Unlock()
+}
+
+func DefaultListener(l service.Listener) {
+	lock.Lock()
+	defer lock.Unlock()
+	defaultListener = l
+	listener.SetDefaultListener(l)
 }
 
 func State(s service.Service) service.State {
@@ -42,8 +51,9 @@ func State(s service.Service) service.State {
 
 // StartWait starts a service in the global runner.
 //
-// You may also provide an optional Listener (which may be the service itself),
-// which will allow the caller to respond to errors and service ends.
+// You may also provide an optional Listener which will allow the caller to
+// respond to errors and service ends. If the listener argument is nil and the
+// service itself implements Listener, it will be used.
 //
 // Listeners can be used multiple times when starting different services.
 //
@@ -51,6 +61,9 @@ func State(s service.Service) service.State {
 func StartWait(s service.Service, l service.Listener, timeout time.Duration) error {
 	lock.RLock()
 	defer lock.RUnlock()
+	if l == nil {
+		l, _ = s.(service.Listener)
+	}
 	if l != nil {
 		listener.Add(s, l)
 	}
@@ -68,6 +81,9 @@ func StartWait(s service.Service, l service.Listener, timeout time.Duration) err
 func Start(s service.Service, l service.Listener) error {
 	lock.RLock()
 	defer lock.RUnlock()
+	if l == nil {
+		l, _ = s.(service.Listener)
+	}
 	if l != nil {
 		listener.Add(s, l)
 	}

@@ -18,13 +18,23 @@ type Service interface {
 	ServiceName() Name
 }
 
+// Func is a convenience function which creates a Service from a function:
+//
+//	runner.Start(service.Func("service", func(ctx service.Context) error {
+//		if err := ctx.Ready(); err != nil {
+//			return err
+//		}
+//		<-ctx.Halt()
+//		return nil
+//	}))
+//
+func Func(name Name, fn func(ctx Context) error) Service {
+	return &serviceFunc{name: name, fn: fn}
+}
+
 type serviceFunc struct {
 	name Name
 	fn   func(ctx Context) error
-}
-
-func Func(name Name, fn func(ctx Context) error) Service {
-	return &serviceFunc{name: name, fn: fn}
 }
 
 func (f *serviceFunc) Run(ctx Context) error {

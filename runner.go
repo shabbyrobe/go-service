@@ -10,6 +10,8 @@ import (
 // Runner Starts, Halts and manages Services.
 type Runner interface {
 	State(s Service) State
+
+	// StartWait is a shorthand for calling Start() then WhenReady()
 	StartWait(s Service, timeout time.Duration) error
 
 	// Start a service in this runner. The runner will retain a reference to it
