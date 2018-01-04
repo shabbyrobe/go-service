@@ -21,7 +21,7 @@ import (
 // - runnerWithFailingStart chance
 // - should randomly call WhenReady on an existing service regardless of its state
 
-func TestRunnerFuzzEverythingHappy(t *testing.T) {
+func TestRunnerFuzzHappy(t *testing.T) {
 	// Happy config: should yield no errors
 	stats := NewStats()
 	testFuzz(t, &RunnerFuzzer{
@@ -46,6 +46,8 @@ func TestRunnerFuzzEverythingHappy(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{1 * time.Second, 1 * time.Second},
 
+		ServiceRegisterBeforeStartChance:  0.1,
+		ServiceRegisterAfterStartChance:   0.1,
 		ServiceUnregisterHaltChance:       0.3,
 		ServiceUnregisterUnexpectedChance: 0,
 
@@ -56,76 +58,31 @@ func TestRunnerFuzzEverythingHappy(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 	for _, s := range []*ServiceStats{stats.ServiceStats, stats.GroupStats} {
-		tt.MustEqual(0, s.GetServiceHaltFailed())
-		tt.MustEqual(0, s.GetServiceStartFailed())
-		tt.MustEqual(0, s.GetServiceStartWaitFailed())
-		tt.MustEqual(0, s.GetServiceUnregisterHaltFailed())
-		tt.MustEqual(0, s.GetServiceUnregisterUnexpectedFailed())
+		tt.MustEqual(0, s.ServiceHalt.Failed())
+		tt.MustEqual(0, s.ServiceStart.Failed())
+		tt.MustEqual(0, s.ServiceStartWait.Failed())
+		tt.MustEqual(0, s.ServiceRegisterBeforeStart.Failed())
+		tt.MustEqual(0, s.ServiceUnregisterHalt.Failed())
+		tt.MustEqual(0, s.ServiceUnregisterUnexpected.Failed())
 	}
 }
 
-func TestRunnerFuzzServiceHappy(t *testing.T) {
-	// Happy config: should yield no errors
+func TestRunnerFuzzMessy(t *testing.T) {
 	testFuzz(t, &RunnerFuzzer{
-		Tick:                      time.Duration(fuzzTickNsec),
-		RunnerCreateChance:        0.01,
-		RunnerHaltChance:          0,
+		Tick:               time.Duration(fuzzTickNsec),
+		RunnerCreateChance: 0.005,
+		RunnerHaltChance:   0.001,
+
 		ServiceCreateChance:       0.2,
-		StartWaitChance:           0.2,
-		ServiceStartFailureChance: 0,
-		ServiceRunFailureChance:   0,
-		ServiceStartTime:          TimeRange{0, 0},
-		StartWaitTimeout:          TimeRange{1 * time.Second, 1 * time.Second},
-		ServiceRunTime:            TimeRange{5 * time.Second, 5 * time.Second},
-		ServiceHaltAfter:          TimeRange{1 * time.Second, 1 * time.Second},
-		ServiceHaltDelay:          TimeRange{0, 0},
-		ServiceHaltTimeout:        TimeRange{1 * time.Second, 1 * time.Second},
-		StateCheckChance:          0.2,
-
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0,
-
-		Stats: NewStats(),
-	})
-}
-
-func TestRunnerFuzzGroupHappy(t *testing.T) {
-	// Happy config: should yield no errors
-	testFuzz(t, &RunnerFuzzer{
-		Tick:                time.Duration(fuzzTickNsec),
-		RunnerCreateChance:  0.01,
-		RunnerHaltChance:    0,
-		ServiceCreateChance: 0,
+		ServiceStartFailureChance: 0.05,
+		ServiceRunFailureChance:   0.05,
 
 		GroupCreateChance:              0.2,
 		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0,
-		GroupServiceRunFailureChance:   0,
+		GroupServiceStartFailureChance: 0.05,
+		GroupServiceRunFailureChance:   0.05,
 
 		StartWaitChance:                   0.2,
-		ServiceStartTime:                  TimeRange{0, 0},
-		StartWaitTimeout:                  TimeRange{1 * time.Second, 1 * time.Second},
-		ServiceRunTime:                    TimeRange{5 * time.Second, 5 * time.Second},
-		ServiceHaltAfter:                  TimeRange{1 * time.Second, 1 * time.Second},
-		ServiceHaltDelay:                  TimeRange{0, 0},
-		ServiceHaltTimeout:                TimeRange{1 * time.Second, 1 * time.Second},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0,
-
-		Stats: NewStats(),
-	})
-}
-
-func TestRunnerFuzzServiceMessy(t *testing.T) {
-	testFuzz(t, &RunnerFuzzer{
-		Tick:                              time.Duration(fuzzTickNsec),
-		RunnerCreateChance:                0.005,
-		RunnerHaltChance:                  0.001,
-		ServiceCreateChance:               0.2,
-		StartWaitChance:                   0.2,
-		ServiceStartFailureChance:         0.05,
-		ServiceRunFailureChance:           0.05,
 		ServiceStartTime:                  TimeRange{0, 21 * time.Millisecond},
 		StartWaitTimeout:                  TimeRange{20 * time.Millisecond, 1 * time.Second},
 		ServiceRunTime:                    TimeRange{0, 500 * time.Millisecond},
@@ -140,34 +97,7 @@ func TestRunnerFuzzServiceMessy(t *testing.T) {
 	})
 }
 
-func TestRunnerFuzzGroupMessy(t *testing.T) {
-	testFuzz(t, &RunnerFuzzer{
-		Tick:               time.Duration(fuzzTickNsec),
-		RunnerCreateChance: 0.005,
-		RunnerHaltChance:   0.001,
-
-		ServiceCreateChance:            0,
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0.01,
-		GroupServiceRunFailureChance:   0.01,
-
-		StartWaitChance:                   0.2,
-		ServiceStartTime:                  TimeRange{0, 21 * time.Millisecond},
-		StartWaitTimeout:                  TimeRange{300 * time.Millisecond, 1 * time.Second},
-		ServiceRunTime:                    TimeRange{0, 500 * time.Millisecond},
-		ServiceHaltAfter:                  TimeRange{0, 500 * time.Millisecond},
-		ServiceHaltDelay:                  TimeRange{0, 100 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{99 * time.Millisecond, 100 * time.Millisecond},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0.02,
-
-		Stats: NewStats(),
-	})
-}
-
-func TestRunnerFuzzEverythingOutrage(t *testing.T) {
+func TestRunnerFuzzOutrage(t *testing.T) {
 	// Pathological configuration - should fail far more often than it succeeds,
 	// but should not leave any stray crap lying around.
 	testFuzz(t, &RunnerFuzzer{
@@ -185,62 +115,6 @@ func TestRunnerFuzzEverythingOutrage(t *testing.T) {
 		GroupServiceRunFailureChance:   0.05,
 
 		StartWaitChance:                   0.2,
-		ServiceStartTime:                  TimeRange{0, 50 * time.Millisecond},
-		StartWaitTimeout:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceRunTime:                    TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltAfter:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltDelay:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{0, 50 * time.Millisecond},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0.3,
-
-		Stats: NewStats(),
-	})
-}
-
-func TestRunnerFuzzServiceOutrage(t *testing.T) {
-	// Pathological configuration - should fail far more often than it succeeds,
-	// but should not leave any stray crap lying around.
-	testFuzz(t, &RunnerFuzzer{
-		Tick:                              time.Duration(fuzzTickNsec),
-		RunnerCreateChance:                0.02,
-		RunnerHaltChance:                  0.01,
-		ServiceCreateChance:               0.3,
-		StartWaitChance:                   0.2,
-		ServiceStartFailureChance:         0.1,
-		ServiceRunFailureChance:           0.2,
-		ServiceStartTime:                  TimeRange{0, 50 * time.Millisecond},
-		StartWaitTimeout:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceRunTime:                    TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltAfter:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltDelay:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{0, 50 * time.Millisecond},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0.3,
-
-		Stats: NewStats(),
-	})
-}
-
-func TestRunnerFuzzGroupOutrage(t *testing.T) {
-	// Pathological configuration - should fail far more often than it succeeds,
-	// but should not leave any stray crap lying around.
-	testFuzz(t, &RunnerFuzzer{
-		Tick:               time.Duration(fuzzTickNsec),
-		RunnerCreateChance: 0.02,
-		RunnerHaltChance:   0.01,
-
-		ServiceCreateChance:            0,
-		GroupCreateChance:              0.3,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0.05,
-		GroupServiceRunFailureChance:   0.05,
-
-		StartWaitChance:                   0.2,
-		ServiceStartFailureChance:         0.1,
-		ServiceRunFailureChance:           0.2,
 		ServiceStartTime:                  TimeRange{0, 50 * time.Millisecond},
 		StartWaitTimeout:                  TimeRange{0, 50 * time.Millisecond},
 		ServiceRunTime:                    TimeRange{0, 50 * time.Millisecond},
@@ -357,10 +231,25 @@ type RunnerFuzzer struct {
 	ServiceRunFailureChance   float64
 	StartWaitChance           float64
 
-	// Chance the service will be unregistered immediately after it is halted.
+	// Chance the fuzzer will register a service just before it is started.
+	// This should always succeed.
+	ServiceRegisterBeforeStartChance float64
+
+	// Chance the fuzzer will register a service just after it is started.
+	// There is a chance this won't succeed if the service halts before
+	// Register is called.
+	ServiceRegisterAfterStartChance float64
+
+	// Chance the fuzzer will attempt to register a random service at a random
+	// moment.
+	ServiceRegisterUnexpectedChance float64
+
+	// Chance the service will be unregistered immediately after it is halted, but
+	// only if it was registered by either ServiceRegisterBeforeStartChance or
+	// ServiceRegisterAfterStartChance.
 	ServiceUnregisterHaltChance float64
 
-	// Chance the runner will attempt to unregister the service at some random
+	// Chance the fuzzer will attempt to unregister a random service at a random
 	// moment.
 	ServiceUnregisterUnexpectedChance float64
 
@@ -441,13 +330,8 @@ func (r *RunnerFuzzer) unexpectedUnregister() {
 
 			svc := randomService(rr)
 			if svc != nil {
-				stats := r.Stats.StatsForService(svc)
-				if err := rr.Unregister(svc); err != nil {
-					stats.AddServiceUnregisterUnexpectedFailed()
-					stats.AddServiceUnregisterUnexpectedError(err)
-				} else {
-					stats.AddServiceUnregisterUnexpected()
-				}
+				err := rr.Unregister(svc)
+				r.Stats.StatsForService(svc).ServiceUnregisterUnexpected.Add(err)
 			}
 		}()
 	}
@@ -472,13 +356,7 @@ func (r *RunnerFuzzer) createService() {
 	} else if should(r.ServiceRunFailureChance) {
 		service.runFailure = errRunFailure
 	}
-
-	runner := r.runners[rand.Intn(r.Stats.GetRunnersCurrent())]
-
-	r.addService(service)
-
-	r.scheduleHalt(runner, service, r.Stats.ServiceStats)
-	r.startService(runner, service, r.Stats.ServiceStats)
+	r.runService(service, r.Stats.ServiceStats)
 }
 
 func (r *RunnerFuzzer) createGroup() {
@@ -505,72 +383,70 @@ func (r *RunnerFuzzer) createGroup() {
 	}
 
 	group := NewGroup(n, services)
+	r.runService(group, r.Stats.GroupStats)
+}
 
+func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 	runner := r.runners[rand.Intn(r.Stats.GetRunnersCurrent())]
 
-	r.addService(group)
-	r.scheduleHalt(runner, group, r.Stats.GroupStats)
-	r.startService(runner, group, r.Stats.GroupStats)
-}
-
-func (r *RunnerFuzzer) addService(svc Service) {
 	r.servicesLock.Lock()
-	r.services = append(r.services, svc)
+	r.services = append(r.services, service)
 	r.servicesLock.Unlock()
-}
 
-func (r *RunnerFuzzer) startService(runner Runner, service Service, stats *ServiceStats) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		if should(r.StartWaitChance) {
-			if err := runner.StartWait(service, r.StartWaitTimeout.Rand()); err != nil {
-				stats.AddServiceStartWaitFailed(1)
-				stats.AddServiceStartWaitError(err)
-			} else {
-				stats.AddServiceStartWaited(1)
-			}
-		} else {
-			if err := runner.Start(service); err != nil {
-				stats.AddServiceStartFailed(1)
-				stats.AddServiceStartError(err)
-			} else {
-				stats.AddServiceStarted(1)
-			}
-		}
-	}()
-}
-
-func (r *RunnerFuzzer) scheduleHalt(runner Runner, service Service, stats *ServiceStats) {
-	r.wg.Add(1)
+	willRegisterBefore := should(r.ServiceRegisterBeforeStartChance)
+	willRegisterAfter := false
+	if !willRegisterBefore {
+		willRegisterAfter = should(r.ServiceRegisterAfterStartChance)
+	}
+	willRegister := willRegisterBefore || willRegisterAfter
 
 	// After a while, we will halt the service, but only if it hasn't ended
 	// first.
+	// This needs to happen before we start the service so that it is possible
+	// under certain configurations for the halt to happen before the start.
+	r.wg.Add(1)
 	time.AfterFunc(r.ServiceHaltAfter.Rand(), func() {
 		defer r.wg.Done()
-		if err := runner.Halt(service, r.ServiceHaltTimeout.Rand()); err != nil {
-			stats.AddServiceHaltFailed(1)
-			stats.AddServiceHaltError(err)
+		err := runner.Halt(service, r.ServiceHaltTimeout.Rand())
+		stats.ServiceHalt.Add(err)
 
-		} else {
-			stats.AddServiceHalted(1)
-
+		if err == nil && willRegister {
 			r.wg.Add(1)
 			go func() {
 				defer r.wg.Done()
-
 				if should(r.ServiceUnregisterHaltChance) {
-					if err := runner.Unregister(service); err != nil {
-						stats.AddServiceUnregisterHaltFailed()
-						stats.AddServiceUnregisterHaltError(err)
-					} else {
-						stats.AddServiceUnregisterHaltSucceeded()
-					}
+					stats.ServiceUnregisterHalt.Add(runner.Unregister(service))
 				}
 			}()
 		}
 	})
 
+	// Start the service
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		if willRegisterBefore {
+			_ = runner.Register(service)
+			stats.ServiceRegisterBeforeStart.Add(nil)
+		}
+
+		if should(r.StartWaitChance) {
+			err := runner.StartWait(service, r.StartWaitTimeout.Rand())
+			stats.ServiceStartWait.Add(err)
+		} else {
+			err := runner.Start(service)
+			stats.ServiceStart.Add(err)
+		}
+
+		if willRegisterAfter {
+			_ = runner.Register(service)
+			stats.ServiceRegisterAfterStart.Add(nil)
+		}
+	}()
+}
+
+func (r *RunnerFuzzer) scheduleHalt(runner Runner, service Service, stats *ServiceStats) {
 }
 
 func (r *RunnerFuzzer) doTick() {
@@ -653,7 +529,6 @@ func (r *RunnerFuzzer) OnServiceEnd(service Service, err Error) {
 		default:
 			s = r.Stats.ServiceStats
 		}
-		s.AddServiceEnded(1)
 		s.AddServiceEnd(err)
 	}
 }
@@ -862,111 +737,43 @@ func (s *Stats) Clone() *Stats {
 }
 
 type ServiceStats struct {
-	ServiceEnded                      int32
-	ServiceHalted                     int32
-	ServiceHaltFailed                 int32
-	ServiceStartWaitFailed            int32
-	ServiceStartWaited                int32
-	ServiceStarted                    int32
-	ServiceStartFailed                int32
-	ServiceUnregisterHaltSucceeded    int32
-	ServiceUnregisterHaltFailed       int32
-	ServiceUnregisterUnexpected       int32
-	ServiceUnregisterUnexpectedFailed int32
-
 	ServiceErrors     map[string]int
 	serviceErrorsLock sync.Mutex
 
+	ServiceEnded    int32
 	ServiceEnds     map[string]int
 	serviceEndsLock sync.Mutex
 
-	ServiceHaltErrors     map[string]int
-	serviceHaltErrorsLock sync.Mutex
-
-	ServiceStartErrors     map[string]int
-	serviceStartErrorsLock sync.Mutex
-
-	ServiceStartWaitErrors     map[string]int
-	serviceStartWaitErrorsLock sync.Mutex
-
-	ServiceUnregisterHaltErrors     map[string]int
-	serviceUnregisterHaltErrorsLock sync.Mutex
-
-	ServiceUnregisterUnexpectedErrors     map[string]int
-	serviceUnregisterUnexpectedErrorsLock sync.Mutex
+	ServiceHalt                 *ErrorCounter
+	ServiceStart                *ErrorCounter
+	ServiceStartWait            *ErrorCounter
+	ServiceUnregisterHalt       *ErrorCounter
+	ServiceUnregisterUnexpected *ErrorCounter
+	ServiceRegisterBeforeStart  *ErrorCounter
+	ServiceRegisterAfterStart   *ErrorCounter
 }
 
 func NewServiceStats() *ServiceStats {
 	return &ServiceStats{
-		ServiceEnds:                       make(map[string]int),
-		ServiceErrors:                     make(map[string]int),
-		ServiceHaltErrors:                 make(map[string]int),
-		ServiceStartErrors:                make(map[string]int),
-		ServiceStartWaitErrors:            make(map[string]int),
-		ServiceUnregisterHaltErrors:       make(map[string]int),
-		ServiceUnregisterUnexpectedErrors: make(map[string]int),
+		ServiceEnds:   make(map[string]int),
+		ServiceErrors: make(map[string]int),
+
+		ServiceHalt:                 &ErrorCounter{},
+		ServiceStart:                &ErrorCounter{},
+		ServiceStartWait:            &ErrorCounter{},
+		ServiceUnregisterHalt:       &ErrorCounter{},
+		ServiceUnregisterUnexpected: &ErrorCounter{},
+		ServiceRegisterBeforeStart:  &ErrorCounter{},
+		ServiceRegisterAfterStart:   &ErrorCounter{},
 	}
 }
 
-func (s *ServiceStats) GetServiceEnded() int  { return int(atomic.LoadInt32(&s.ServiceEnded)) }
-func (s *ServiceStats) AddServiceEnded(n int) { atomic.AddInt32(&s.ServiceEnded, int32(n)) }
-
-func (s *ServiceStats) GetServiceHalted() int  { return int(atomic.LoadInt32(&s.ServiceHalted)) }
-func (s *ServiceStats) AddServiceHalted(n int) { atomic.AddInt32(&s.ServiceHalted, int32(n)) }
-
-func (s *ServiceStats) GetServiceHaltFailed() int  { return int(atomic.LoadInt32(&s.ServiceHaltFailed)) }
-func (s *ServiceStats) AddServiceHaltFailed(n int) { atomic.AddInt32(&s.ServiceHaltFailed, int32(n)) }
-
-func (s *ServiceStats) GetServiceStarted() int  { return int(atomic.LoadInt32(&s.ServiceStarted)) }
-func (s *ServiceStats) AddServiceStarted(n int) { atomic.AddInt32(&s.ServiceStarted, int32(n)) }
-
-func (s *ServiceStats) GetServiceStartFailed() int {
-	return int(atomic.LoadInt32(&s.ServiceStartFailed))
-}
-func (s *ServiceStats) AddServiceStartFailed(n int) { atomic.AddInt32(&s.ServiceStartFailed, int32(n)) }
-
-func (s *ServiceStats) GetServiceStartWaited() int {
-	return int(atomic.LoadInt32(&s.ServiceStartWaited))
-}
-func (s *ServiceStats) AddServiceStartWaited(n int) { atomic.AddInt32(&s.ServiceStartWaited, int32(n)) }
-
-func (s *ServiceStats) GetServiceStartWaitFailed() int {
-	return int(atomic.LoadInt32(&s.ServiceStartWaitFailed))
-}
-func (s *ServiceStats) AddServiceStartWaitFailed(n int) {
-	atomic.AddInt32(&s.ServiceStartWaitFailed, int32(n))
-}
-
-func (s *ServiceStats) GetServiceUnregisterHaltFailed() int {
-	return int(atomic.LoadInt32(&s.ServiceUnregisterHaltFailed))
-}
-func (s *ServiceStats) AddServiceUnregisterHaltFailed() {
-	atomic.AddInt32(&s.ServiceUnregisterHaltFailed, 1)
-}
-
-func (s *ServiceStats) GetServiceUnregisterHaltSucceeded() int {
-	return int(atomic.LoadInt32(&s.ServiceUnregisterHaltSucceeded))
-}
-func (s *ServiceStats) AddServiceUnregisterHaltSucceeded() {
-	atomic.AddInt32(&s.ServiceUnregisterHaltSucceeded, 1)
-}
-
-func (s *ServiceStats) GetServiceUnregisterUnexpectedFailed() int {
-	return int(atomic.LoadInt32(&s.ServiceUnregisterUnexpectedFailed))
-}
-func (s *ServiceStats) AddServiceUnregisterUnexpectedFailed() {
-	atomic.AddInt32(&s.ServiceUnregisterUnexpectedFailed, 1)
-}
-
-func (s *ServiceStats) GetServiceUnregisterUnexpected() int {
-	return int(atomic.LoadInt32(&s.ServiceUnregisterUnexpected))
-}
-func (s *ServiceStats) AddServiceUnregisterUnexpected() {
-	atomic.AddInt32(&s.ServiceUnregisterUnexpected, 1)
-}
+func (s *ServiceStats) GetServiceEnded() int { return int(atomic.LoadInt32(&s.ServiceEnded)) }
+func (s *ServiceStats) AddServiceEnded()     { atomic.AddInt32(&s.ServiceEnded, 1) }
 
 func (s *ServiceStats) AddServiceEnd(err error) {
 	s.serviceEndsLock.Lock()
+	s.AddServiceEnded()
 	for _, msg := range fuzzErrs(err) {
 		s.ServiceEnds[msg]++
 	}
@@ -981,59 +788,17 @@ func (s *ServiceStats) AddServiceError(err error) {
 	s.serviceErrorsLock.Unlock()
 }
 
-func (s *ServiceStats) AddServiceHaltError(err error) {
-	s.serviceHaltErrorsLock.Lock()
-	for _, msg := range fuzzErrs(err) {
-		s.ServiceHaltErrors[msg]++
-	}
-	s.serviceHaltErrorsLock.Unlock()
-}
-
-func (s *ServiceStats) AddServiceStartError(err error) {
-	s.serviceStartErrorsLock.Lock()
-	for _, msg := range fuzzErrs(err) {
-		s.ServiceStartErrors[msg]++
-	}
-	s.serviceStartErrorsLock.Unlock()
-}
-
-func (s *ServiceStats) AddServiceStartWaitError(err error) {
-	s.serviceStartWaitErrorsLock.Lock()
-	for _, msg := range fuzzErrs(err) {
-		s.ServiceStartWaitErrors[msg]++
-	}
-	s.serviceStartWaitErrorsLock.Unlock()
-}
-
-func (s *ServiceStats) AddServiceUnregisterHaltError(err error) {
-	s.serviceUnregisterHaltErrorsLock.Lock()
-	for _, msg := range fuzzErrs(err) {
-		s.ServiceUnregisterHaltErrors[msg]++
-	}
-	s.serviceUnregisterHaltErrorsLock.Unlock()
-}
-
-func (s *ServiceStats) AddServiceUnregisterUnexpectedError(err error) {
-	s.serviceUnregisterUnexpectedErrorsLock.Lock()
-	for _, msg := range fuzzErrs(err) {
-		s.ServiceUnregisterUnexpectedErrors[msg]++
-	}
-	s.serviceUnregisterUnexpectedErrorsLock.Unlock()
-}
-
 func (s *ServiceStats) Clone() *ServiceStats {
 	n := NewServiceStats()
 	n.ServiceEnded = int32(s.GetServiceEnded())
-	n.ServiceHalted = int32(s.GetServiceHalted())
-	n.ServiceHaltFailed = int32(s.GetServiceHaltFailed())
-	n.ServiceStarted = int32(s.GetServiceStarted())
-	n.ServiceStartFailed = int32(s.GetServiceStartFailed())
-	n.ServiceStartWaited = int32(s.GetServiceStartWaited())
-	n.ServiceStartWaitFailed = int32(s.GetServiceStartWaitFailed())
-	n.ServiceUnregisterHaltFailed = int32(s.GetServiceUnregisterHaltFailed())
-	n.ServiceUnregisterHaltSucceeded = int32(s.GetServiceUnregisterHaltSucceeded())
-	n.ServiceUnregisterUnexpectedFailed = int32(s.GetServiceUnregisterUnexpectedFailed())
-	n.ServiceUnregisterUnexpected = int32(s.GetServiceUnregisterUnexpected())
+
+	n.ServiceHalt = s.ServiceHalt.Clone()
+	n.ServiceStart = s.ServiceStart.Clone()
+	n.ServiceStartWait = s.ServiceStartWait.Clone()
+	n.ServiceUnregisterHalt = s.ServiceUnregisterHalt.Clone()
+	n.ServiceUnregisterUnexpected = s.ServiceUnregisterUnexpected.Clone()
+	n.ServiceRegisterAfterStart = s.ServiceRegisterAfterStart.Clone()
+	n.ServiceRegisterBeforeStart = s.ServiceRegisterBeforeStart.Clone()
 
 	s.serviceEndsLock.Lock()
 	for m, c := range s.ServiceEnds {
@@ -1046,36 +811,6 @@ func (s *ServiceStats) Clone() *ServiceStats {
 		n.ServiceErrors[m] = c
 	}
 	s.serviceErrorsLock.Unlock()
-
-	s.serviceHaltErrorsLock.Lock()
-	for m, c := range s.ServiceHaltErrors {
-		n.ServiceHaltErrors[m] = c
-	}
-	s.serviceHaltErrorsLock.Unlock()
-
-	s.serviceStartErrorsLock.Lock()
-	for m, c := range s.ServiceStartErrors {
-		n.ServiceStartErrors[m] = c
-	}
-	s.serviceStartErrorsLock.Unlock()
-
-	s.serviceStartWaitErrorsLock.Lock()
-	for m, c := range s.ServiceStartWaitErrors {
-		n.ServiceStartWaitErrors[m] = c
-	}
-	s.serviceStartWaitErrorsLock.Unlock()
-
-	s.serviceUnregisterHaltErrorsLock.Lock()
-	for m, c := range s.ServiceUnregisterHaltErrors {
-		n.ServiceUnregisterHaltErrors[m] = c
-	}
-	s.serviceUnregisterHaltErrorsLock.Unlock()
-
-	s.serviceUnregisterUnexpectedErrorsLock.Lock()
-	for m, c := range s.ServiceUnregisterUnexpectedErrors {
-		n.ServiceUnregisterUnexpectedErrors[m] = c
-	}
-	s.serviceUnregisterUnexpectedErrorsLock.Unlock()
 
 	return n
 }
@@ -1236,5 +971,64 @@ func (wg *condGroup) Wait() {
 		} else {
 			return
 		}
+	}
+}
+
+type ErrorCounter struct {
+	succeeded int32
+	failed    int32
+	errors    map[string]int
+	lock      sync.Mutex
+}
+
+func (e *ErrorCounter) MarshalJSON() ([]byte, error) {
+	out := map[string]interface{}{}
+	if e.succeeded > 0 {
+		out["Succeeded"] = e.succeeded
+	}
+	if e.failed > 0 {
+		out["Failed"] = e.failed
+	}
+	if len(e.errors) > 0 {
+		out["Errors"] = e.errors
+	}
+	return json.Marshal(out)
+}
+
+func (e *ErrorCounter) Succeeded() int { return int(atomic.LoadInt32(&e.succeeded)) }
+func (e *ErrorCounter) Failed() int {
+	e.lock.Lock()
+	out := e.failed
+	e.lock.Unlock()
+	return int(out)
+}
+
+func (e *ErrorCounter) Clone() *ErrorCounter {
+	ec := &ErrorCounter{
+		succeeded: atomic.LoadInt32(&e.succeeded),
+		errors:    make(map[string]int),
+	}
+	e.lock.Lock()
+	ec.failed = e.failed
+	for k, v := range e.errors {
+		ec.errors[k] = v
+	}
+	e.lock.Unlock()
+	return ec
+}
+
+func (e *ErrorCounter) Add(err error) {
+	if err == nil {
+		atomic.AddInt32(&e.succeeded, 1)
+	} else {
+		e.lock.Lock()
+		e.failed++
+		if e.errors == nil {
+			e.errors = make(map[string]int)
+		}
+		for _, msg := range fuzzErrs(err) {
+			e.errors[msg]++
+		}
+		e.lock.Unlock()
 	}
 }

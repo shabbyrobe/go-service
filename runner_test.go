@@ -14,7 +14,7 @@ func mustStateError(tt assert.T, err error, expected State, current State) {
 	tt.Helper()
 	tt.MustAssert(err != nil, "state error not found")
 	serr, ok := err.(*errState)
-	tt.MustAssert(ok)
+	tt.MustAssert(ok, err)
 	tt.MustEqual(expected, serr.Expected, serr.Error())
 	tt.MustEqual(current, serr.Current, serr.Error())
 }
@@ -47,7 +47,8 @@ func TestEnsureHalt(t *testing.T) {
 	tt.MustOK(EnsureHalt(r, s1, dto))
 	tt.MustOK(EnsureHalt(r, s1, dto))
 
-	mustStateError(tt, r.Halt(s1, dto), Starting|Started, Halted)
+	herr := r.Halt(s1, dto)
+	tt.MustAssert(IsErrServiceUnknown(herr), herr)
 
 	// runTime must be long enough to ensure that EnsureHalt times out
 	s2 := (&unhaltableService{}).Init()
@@ -78,7 +79,7 @@ func TestRunnerStartWait(t *testing.T) {
 		tt.MustAssert(r.State(s1) == Halted)
 		tt.MustOK(r.WhenReady(s1, dto)) // make sure WhenReady works in this state
 
-		mustStateError(tt, r.Halt(s1, dto), Starting|Started, Halted)
+		tt.MustAssert(IsErrServiceUnknown(r.Halt(s1, dto)))
 	}
 }
 
@@ -546,20 +547,31 @@ func TestRunnerServices(t *testing.T) {
 
 	s1 := (&blockingService{}).Init()
 	s2 := (&blockingService{}).Init()
+	s3 := (&blockingService{}).Init()
 	r := NewRunner(newDummyListener())
 
 	tt.MustEqual(0, len(r.Services(AnyState)))
-	tt.MustOK(r.StartWait(s1, dto))
-	tt.MustOK(r.StartWait(s2, dto))
 
-	tt.MustEqual([]Service{s1, s2}, r.Services(AnyState))
-	tt.MustEqual([]Service{s1, s2}, r.Services(Started))
+	r.Register(s1)
+	tt.MustEqual([]Service{s1}, r.Services(Halted))
+
+	tt.MustOK(r.StartWait(s2, dto))
+	tt.MustOK(r.StartWait(s3, dto))
+
+	tt.MustEqual([]Service{s1}, r.Services(Halted))
+	tt.MustEqual([]Service{s2, s3}, r.Services(Started))
+
+	tt.MustOK(r.StartWait(s1, dto))
+	tt.MustEqual([]Service{s1, s2, s3}, r.Services(AnyState))
+	tt.MustEqual([]Service{s1, s2, s3}, r.Services(Started))
 
 	tt.MustOK(r.HaltAll(dto))
-	tt.MustEqual([]Service{s1, s2}, r.Services(Halted))
+
+	// halted services are removed from the runner unless they are registered
+	tt.MustEqual([]Service{s1}, r.Services(Halted))
 
 	tt.MustOK(r.Unregister(s1))
-	tt.MustEqual([]Service{s2}, r.Services(AnyState))
+	tt.MustEqual([]Service{}, r.Services(AnyState))
 }
 
 func TestRunnerServiceFunc(t *testing.T) {

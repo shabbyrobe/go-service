@@ -26,14 +26,19 @@ type Runner interface {
 	// references to the services until Unregister is called.
 	HaltAll(timeout time.Duration) error
 
-	// Services returns a list of services currently registered at the time of
-	// the call. If State is provided, only services matching the state are
-	// returned.
-	Services(state State) []Service
+	// Services returns a list of services currently registered or running at
+	// the time of the call. If State is provided, only services matching the
+	// state are returned.
+	Services(state State)
 
-	// Unregister unregisters a service that has been started and halted in this runner.
-	// If you start a service, the runner will retain a reference to it until
-	// Unregister is called.
+	// Register instructs the runner to retain the service after it has ended.
+	// Services that are not registered are not retained.
+	// Register must return the runner upon which it was called.
+	Register(s Service) Runner
+
+	// Unregister unregisters a service that has been registered in this runner.
+	// If the service is running, it will not be unregistered immediately, but will
+	// be Unregistered when it stops, either by halting or by erroring.
 	Unregister(s Service) error
 
 	// WhenReady blocks until the service is ready or an error occurs.
@@ -44,6 +49,9 @@ type Runner interface {
 	//	- The service returns before calling ctx.Ready()
 	//	- The service is halted before callig ctx.Ready()
 	//	- The timeout elapses
+	//	- The service is not known to the runner. This case does not return an
+	//	  error because an unregistered service may halt before WhenReady can be
+	//	  called.
 	//
 	// It returns nil if ctx.Ready() was successfully called, and an error in
 	// all other cases.
@@ -83,6 +91,8 @@ func EnsureHalt(r Runner, s Service, timeout time.Duration) error {
 	}
 	if serr, ok := err.(*errState); ok && serr.Current == Halted {
 		return nil
+	} else if IsErrServiceUnknown(err) {
+		return nil
 	}
 	return err
 }
@@ -119,6 +129,7 @@ type runnerState struct {
 	changer        *stateChanger
 	startingCalled int32
 	readyCalled    int32
+	retain         bool
 	ready          chan error
 	halt           chan struct{}
 	halted         chan struct{}
@@ -299,9 +310,7 @@ func (r *runner) Starting(service Service) error {
 
 	var svc = r.states[service]
 	if svc == nil {
-		svc = &runnerState{
-			changer: newStateChanger(),
-		}
+		svc = newRunnerState()
 		r.states[service] = svc
 	} else {
 		svc.SetReadyCalled(false)
@@ -408,11 +417,15 @@ func (r *runner) Halted(service Service) error {
 }
 
 func (r *runner) halted(service Service) error {
-	if r.states[service] == nil {
+	rs := r.states[service]
+	if rs == nil {
 		return errServiceUnknown(0)
 	}
-	if err := r.states[service].changer.SetHalted(nil); err != nil {
+	if err := rs.changer.SetHalted(nil); err != nil {
 		return err
+	}
+	if !rs.retain {
+		delete(r.states, service)
 	}
 	if r.listener != nil {
 		go r.listener.OnServiceState(service, Halting)
@@ -420,37 +433,49 @@ func (r *runner) halted(service Service) error {
 	return nil
 }
 
+func (r *runner) Register(service Service) Runner {
+	r.statesLock.Lock()
+	defer r.statesLock.Unlock()
+
+	rs := r.states[service]
+	if rs == nil {
+		rs = newRunnerState()
+		r.states[service] = rs
+	}
+	rs.retain = true
+	return r
+}
+
 func (r *runner) Unregister(service Service) error {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
-	if r.states[service] == nil {
+	rs := r.states[service]
+	if rs == nil {
 		return errServiceUnknown(0)
 	}
 
-	state := r.states[service].changer.State()
+	state := rs.changer.State()
 	if state != Halted {
-		return &errState{Halted, Halted, state}
+		rs.retain = false
+	} else {
+		delete(r.states, service)
 	}
-	delete(r.states, service)
 	return nil
 }
 
 func (r *runner) WhenReady(service Service, limit time.Duration) error {
-	errc, err := func() (chan error, error) {
+	errc := func() chan error {
 		r.statesLock.Lock()
 		defer r.statesLock.Unlock()
 
 		rs := r.states[service]
 		if rs == nil {
-			return nil, errServiceUnknown(0)
+			return nil
 		}
-		return rs.ready, nil
+		return rs.ready
 	}()
 
-	if err != nil {
-		return err
-	}
 	if errc == nil {
 		return nil
 	}
@@ -465,5 +490,11 @@ func (r *runner) WhenReady(service Service, limit time.Duration) error {
 		return errWaitTimeout(0)
 	case err := <-errc:
 		return err
+	}
+}
+
+func newRunnerState() *runnerState {
+	return &runnerState{
+		changer: newStateChanger(),
 	}
 }
