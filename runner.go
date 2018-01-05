@@ -18,29 +18,6 @@ type Runner interface {
 	// until Unregister is called even if the service is Halted.
 	Start(s Service) error
 
-	// Halt a service started in this runner. The runner will retain a
-	// reference to it until Unregister is called.
-	Halt(s Service, timeout time.Duration) error
-
-	// HaltAll halts all services started in this runner. The runner will retain
-	// references to the services until Unregister is called.
-	HaltAll(timeout time.Duration) error
-
-	// Services returns a list of services currently registered or running at
-	// the time of the call. If State is provided, only services matching the
-	// state are returned.
-	Services(state State)
-
-	// Register instructs the runner to retain the service after it has ended.
-	// Services that are not registered are not retained.
-	// Register must return the runner upon which it was called.
-	Register(s Service) Runner
-
-	// Unregister unregisters a service that has been registered in this runner.
-	// If the service is running, it will not be unregistered immediately, but will
-	// be Unregistered when it stops, either by halting or by erroring.
-	Unregister(s Service) error
-
 	// WhenReady blocks until the service is ready or an error occurs.
 	// It will unblock when one of the following conditions is met:
 	//
@@ -56,6 +33,29 @@ type Runner interface {
 	// It returns nil if ctx.Ready() was successfully called, and an error in
 	// all other cases.
 	WhenReady(s Service, timeout time.Duration) error
+
+	// Halt a service started in this runner. The runner will retain a
+	// reference to it until Unregister is called.
+	Halt(s Service, timeout time.Duration) error
+
+	// HaltAll halts all services started in this runner. The runner will retain
+	// references to the services until Unregister is called.
+	HaltAll(timeout time.Duration) error
+
+	// Services returns a list of services currently registered or running at
+	// the time of the call. If State is provided, only services matching the
+	// state are returned.
+	Services(state StateQuery) []Service
+
+	// Register instructs the runner to retain the service after it has ended.
+	// Services that are not registered are not retained.
+	// Register must return the runner upon which it was called.
+	Register(s Service) Runner
+
+	// Unregister unregisters a service that has been registered in this runner.
+	// If the service is running, it will not be unregistered immediately, but will
+	// be Unregistered when it stops, either by halting or by erroring.
+	Unregister(s Service) error
 }
 
 // Listener allows you to respond to events raised by the Runner in the
@@ -167,13 +167,13 @@ func NewRunner(listener Listener) Runner {
 	}
 }
 
-func (r *runner) Services(state State) []Service {
+func (r *runner) Services(query StateQuery) []Service {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
 	out := make([]Service, 0, len(r.states))
 	for service, rs := range r.states {
-		if state == AnyState || state&rs.changer.State() != 0 {
+		if query.Match(rs.changer.State(), rs.retain) {
 			out = append(out, service)
 		}
 	}

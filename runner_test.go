@@ -407,6 +407,26 @@ func TestRunnerHaltingState(t *testing.T) {
 	tt.MustAssert(counts[Halting] > 0)
 }
 
+func TestRunnerRegisterMultiple(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	s1 := (&blockingService{}).Init()
+	r := NewRunner(newDummyListener())
+
+	tt.MustOK(r.Register(s1).Register(s1).StartWait(s1, dto))
+	tt.MustEqual(1, len(r.Services(FindRegistered)))
+	tt.MustOK(r.Halt(s1, dto))
+	tt.MustAssert(r.State(s1) == Halted)
+	tt.MustEqual(Halted, r.State(s1))
+	tt.MustEqual(1, len(r.Services(FindRegistered)))
+
+	tt.MustOK(r.Unregister(s1))
+	tt.MustEqual(0, len(r.Services(FindRegistered)))
+	tt.MustAssert(IsErrServiceUnknown(r.Unregister(s1)))
+}
+
 func TestRunnerUnregister(t *testing.T) {
 	t.Parallel()
 
@@ -415,7 +435,7 @@ func TestRunnerUnregister(t *testing.T) {
 	s1 := (&blockingService{}).Init()
 	r := NewRunner(newDummyListener())
 
-	tt.MustOK(r.StartWait(s1, dto))
+	tt.MustOK(r.Register(s1).StartWait(s1, dto))
 	tt.MustOK(r.Halt(s1, dto))
 	tt.MustAssert(r.State(s1) == Halted)
 	tt.MustEqual(Halted, r.State(s1))
@@ -432,13 +452,16 @@ func TestRunnerUnregisterWhileNotHalted(t *testing.T) {
 	s1 := (&blockingService{}).Init()
 	r := NewRunner(newDummyListener())
 
-	tt.MustOK(r.StartWait(s1, dto))
+	tt.MustOK(r.Register(s1).StartWait(s1, dto))
+	tt.MustEqual(0, len(r.Services(FindUnregistered)))
+	tt.MustEqual(1, len(r.Services(FindRegistered)))
 	tt.MustAssert(r.State(s1) == Started)
 
-	err := (r.Unregister(s1))
-	mustStateError(tt, err, Halted, Started)
-
+	tt.MustOK(r.Unregister(s1))
+	tt.MustEqual(0, len(r.Services(FindRegistered)))
+	tt.MustEqual(1, len(r.Services(FindUnregistered)))
 	tt.MustOK(r.Halt(s1, dto))
+	tt.MustEqual(0, len(r.Services(AnyState)))
 }
 
 func TestHaltableSleep(t *testing.T) {
@@ -553,22 +576,22 @@ func TestRunnerServices(t *testing.T) {
 	tt.MustEqual(0, len(r.Services(AnyState)))
 
 	r.Register(s1)
-	tt.MustEqual([]Service{s1}, r.Services(Halted))
+	tt.MustEqual([]Service{s1}, r.Services(FindHalted))
 
 	tt.MustOK(r.StartWait(s2, dto))
 	tt.MustOK(r.StartWait(s3, dto))
 
-	tt.MustEqual([]Service{s1}, r.Services(Halted))
-	tt.MustEqual([]Service{s2, s3}, r.Services(Started))
+	tt.MustEqual([]Service{s1}, r.Services(FindHalted))
+	tt.MustEqual([]Service{s2, s3}, r.Services(FindStarted))
 
 	tt.MustOK(r.StartWait(s1, dto))
 	tt.MustEqual([]Service{s1, s2, s3}, r.Services(AnyState))
-	tt.MustEqual([]Service{s1, s2, s3}, r.Services(Started))
+	tt.MustEqual([]Service{s1, s2, s3}, r.Services(FindStarted))
 
 	tt.MustOK(r.HaltAll(dto))
 
 	// halted services are removed from the runner unless they are registered
-	tt.MustEqual([]Service{s1}, r.Services(Halted))
+	tt.MustEqual([]Service{s1}, r.Services(FindHalted))
 
 	tt.MustOK(r.Unregister(s1))
 	tt.MustEqual([]Service{}, r.Services(AnyState))

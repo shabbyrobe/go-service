@@ -6,14 +6,12 @@ import (
 
 type State int
 
-func (s State) IsRunning() bool { return s&Running == s }
+func (s State) IsRunning() bool { return s == Starting || s == Started }
 
 func (s State) String() string {
 	switch s {
 	case Halted:
 		return "halted"
-	case Running:
-		return "running (starting or started)"
 	case Starting:
 		return "starting"
 	case Started:
@@ -26,15 +24,54 @@ func (s State) String() string {
 }
 
 const (
-	NoState  = 0
-	AnyState = 0
-
-	Halted State = 1 << iota
+	NoState State = iota
+	Halted
 	Starting
 	Started
 	Halting
+)
 
-	Running = Starting | Started
+type StateQuery int
+
+func (q StateQuery) Match(state State, registered bool) bool {
+	svcMatch := true
+	if q != AnyState && (q&(FindRunning|FindNotRunning) > 0) {
+		switch state {
+		case Halting:
+			svcMatch = q&FindHalting != 0
+		case Halted:
+			svcMatch = q&FindHalted != 0
+		case Starting:
+			svcMatch = q&FindStarting != 0
+		case Started:
+			svcMatch = q&FindStarted != 0
+		}
+	}
+
+	regMatch := false
+	findReg, findUnreg := (q&FindRegistered != 0), (q&FindUnregistered != 0)
+	if (findReg && registered) || (findUnreg && !registered) {
+		regMatch = true
+	} else if !findReg && !findUnreg {
+		regMatch = true
+	}
+
+	return svcMatch && regMatch
+}
+
+const (
+	AnyState StateQuery = 0
+
+	FindHalted StateQuery = 1 << iota
+	FindStarting
+	FindStarted
+	FindHalting
+
+	FindRegistered
+	FindUnregistered
+
+	FindRunning    = FindStarting | FindStarted
+	FindNotRunning = FindHalting | FindHalted
 )
 
 type stateChanger struct {
