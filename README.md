@@ -52,12 +52,12 @@ func main() {
 
     // Start a service in the background and wait for it to signal it is
     // ready:
-    if err := runner.StartWait(svc, 1 * time.Second); err != nil {
+    if err := runner.StartWait(1 * time.Second, svc); err != nil {
         log.Fatal(err)
     }
 
     // Halt a service and wait for it to signal it finished:
-    if err := runner.Halt(svc, 1 * time.Second); err != nil {
+    if err := runner.Halt(1 * time.Second, svc); err != nil {
         log.Fatal(err)
     }
 }
@@ -95,12 +95,12 @@ func main() {
 
     // Start the group in the background and wait for all of its child services
     // to signal they are ready:
-    if err := runner.StartWait(group, 1 * time.Second); err != nil {
+    if err := runner.StartWait(1 * time.Second, group); err != nil {
         log.Fatal(err)
     }
 
     // Halt a service and wait for it to signal it finished:
-    if err := runner.Halt(svc, 1 * time.Second); err != nil {
+    if err := runner.Halt(1 * time.Second, svc); err != nil {
         log.Fatal(err)
     }
 }

@@ -22,10 +22,10 @@ Quick Example
 	func main() {
 		runner := service.NewRunner(nil)
 		svc := &MyService{}
-		if err := runner.StartWait(svc, 1 * time.Second); err != nil {
+		if err := runner.StartWait(1 * time.Second, svc); err != nil {
 			log.Fatal(err)
 		}
-		if err := runner.Halt(svc, 1 * time.Second); err != nil {
+		if err := runner.Halt(1 * time.Second, svc); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -138,17 +138,17 @@ To start or halt a service, a Runner is required.
 	// start another service and wait no more than 1 second until it's ready
 	// before returning:
 	svc := &MyService{}
-	err := r.StartWait(svc, 1 * time.Second)
+	err := r.StartWait(1 * time.Second, svc)
 
 	// the above StartWait call is equivalent to the following (error handling
 	// skipped for brevity):
 	svc := &MyService{}
 	err := r.Start(svc)
-	err := r.WhenReady(svc, 1 * time.Second)
+	err := r.WhenReady(1 * time.Second, svc)
 
 	// now halt the service we just started, waiting no more than 1 second
 	// for the service to end:
-	err := r.Halt(svc, 1 * time.Second)
+	err := r.Halt(1 * time.Second, svc)
 
 	// halt every service currently started in the runner, waiting no more
 	// than 1 second for each service to be halted (if there are 3 services,
