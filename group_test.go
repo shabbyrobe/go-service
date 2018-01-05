@@ -24,8 +24,8 @@ func TestGroup(t *testing.T) {
 	r := NewRunner(newDummyListener())
 	g := NewGroup("yep", []Service{s1, s2})
 
-	tt.MustOK(r.StartWait(g, dto))
-	tt.MustOK(r.Halt(g, dto))
+	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(r.Halt(dto, g))
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 
 	tt.MustEqual(Halted, r.State(g))
@@ -43,8 +43,8 @@ func TestGroupEndOne(t *testing.T) {
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
 	ew := lc.endWaiter(g)
-	tt.MustOK(r.StartWait(g, dto))
-	defer MustEnsureHalt(r, g, dto)
+	tt.MustOK(r.StartWait(dto, g))
+	defer MustEnsureHalt(r, dto, g)
 	<-ew
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
@@ -65,8 +65,8 @@ func TestGroupOneFailsBeforeReady(t *testing.T) {
 	r := NewRunner(lc)
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
-	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
-	defer MustEnsureHalt(r, g, dto)
+	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
+	defer MustEnsureHalt(r, dto, g)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 1, 0, s3)
@@ -86,8 +86,8 @@ func TestGroupOneFailsAfterReady(t *testing.T) {
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
 	ew := lc.endWaiter(g)
-	tt.MustOK(r.StartWait(g, dto))
-	defer MustEnsureHalt(r, g, dto)
+	tt.MustOK(r.StartWait(dto, g))
+	defer MustEnsureHalt(r, dto, g)
 	<-ew
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
@@ -109,7 +109,7 @@ func TestGroupEndMultiple(t *testing.T) {
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
 	ew := lc.endWaiter(g)
-	tt.MustOK(r.StartWait(g, dto))
+	tt.MustOK(r.StartWait(dto, g))
 	<-ew
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
@@ -130,13 +130,13 @@ func TestGroupEndAll(t *testing.T) {
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
 	ew := lc.endWaiter(g)
-	tt.MustOK(r.StartWait(g, dto))
+	tt.MustOK(r.StartWait(dto, g))
 	<-ew
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
 	tt.MustEqual(1, len(lc.ends(g)))
 
-	tt.MustOK(EnsureHalt(r, g, dto))
+	tt.MustOK(EnsureHalt(r, dto, g))
 }
 
 func TestGroupRunTwice(t *testing.T) {
@@ -149,10 +149,10 @@ func TestGroupRunTwice(t *testing.T) {
 	r2 := NewRunner(newDummyListener())
 	g := NewGroup("yep", []Service{s1, s2})
 
-	tt.MustOK(r1.StartWait(g, dto))
-	tt.MustOK(r2.StartWait(g, dto))
-	tt.MustOK(r1.Halt(g, dto))
-	tt.MustOK(r2.Halt(g, dto))
+	tt.MustOK(r1.StartWait(dto, g))
+	tt.MustOK(r2.StartWait(dto, g))
+	tt.MustOK(r1.Halt(dto, g))
+	tt.MustOK(r2.Halt(dto, g))
 
 	assertStartHaltCount(tt, 2, 2, s1, s2)
 }
@@ -171,7 +171,7 @@ func TestGroupStartError(t *testing.T) {
 	g := NewGroup("yep", []Service{s1, s2, s3})
 
 	ew := lc.endWaiter(g)
-	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
+	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 1, 0, s3)
@@ -204,7 +204,7 @@ func TestGroupRunnerError(t *testing.T) {
 	}
 
 	ew := lc.endWaiter(g)
-	tt.MustEqual(e1, cause(r.StartWait(g, dto)))
+	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 0, 0, s3)

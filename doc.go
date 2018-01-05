@@ -31,6 +31,21 @@ Quick Example
 	}
 
 
+Performance
+
+Services are by nature heavier than a regular goroutine; they're about 10x slower
+and use quite a bit more memory. You should probably only use Services when you
+need to fully control the management of a long-lived goroutine, otherwise
+they're likely not worth it:
+
+	BenchmarkRunnerStart10-4      	   50000	     24519 ns/op	    4641 B/op	      90 allocs/op
+	BenchmarkGoroutineStart10-4   	 1000000	      2239 ns/op	       0 B/op	       0 allocs/op
+
+There are opportunities for memory savings in the library, but the chief
+priority has been to get it working and stable, rather than fast. I don't plan
+to start 50,000 services a second in any app I am currently working on.
+
+
 Services
 
 Services can be created by implementing the Service interface. This interface

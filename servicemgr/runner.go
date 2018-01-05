@@ -58,7 +58,7 @@ func State(s service.Service) service.State {
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartWait(s service.Service, l service.Listener, timeout time.Duration) error {
+func StartWaitListen(timeout time.Duration, l service.Listener, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
@@ -67,10 +67,14 @@ func StartWait(s service.Service, l service.Listener, timeout time.Duration) err
 	if l != nil {
 		listener.Add(s, l)
 	}
-	return runner.StartWait(s, timeout)
+	return runner.StartWait(timeout, s)
 }
 
-// Start starts a service in the global runner.
+func StartWait(timeout time.Duration, s service.Service) error {
+	return StartWaitListen(timeout, nil, s)
+}
+
+// StartListen starts a service in the global runner.
 //
 // You may also provide an optional Listener (which may be the service itself),
 // which will allow the caller to respond to errors and service ends.
@@ -78,7 +82,7 @@ func StartWait(s service.Service, l service.Listener, timeout time.Duration) err
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Start(s service.Service, l service.Listener) error {
+func StartListen(l service.Listener, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
@@ -90,14 +94,18 @@ func Start(s service.Service, l service.Listener) error {
 	return runner.Start(s)
 }
 
+func Start(s service.Service) error {
+	return StartListen(nil, s)
+}
+
 // Halt halts a service in the global runner.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Halt(s service.Service, timeout time.Duration) error {
+func Halt(timeout time.Duration, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return runner.Halt(s, timeout)
+	return runner.Halt(timeout, s)
 }
 
 // HaltAll halts all services in the global runner.
@@ -110,18 +118,25 @@ func HaltAll(timeout time.Duration) error {
 	return runner.HaltAll(timeout)
 }
 
-// Services halts all services in the global runner.
+// Services lists services in the global runner based on the criteria.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Services(state service.State) []service.Service {
+func Services(state service.StateQuery) []service.Service {
 	lock.RLock()
 	defer lock.RUnlock()
 
 	return runner.Services(state)
 }
 
-// Unregister unregisters a service from the global runner. Only a halted
-// service can be unregistered.
+// Register registers a service from the global runner.
+func Register(s service.Service) Starter {
+	lock.RLock()
+	defer lock.RUnlock()
+	_ = runner.Register(s)
+	return Starter{s}
+}
+
+// Unregister unregisters a service from the global runner.
 func Unregister(s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -131,11 +146,11 @@ func Unregister(s service.Service) error {
 }
 
 // WhenReady waits until a service in the global runner has started.
-func WhenReady(s service.Service, timeout time.Duration) error {
+func WhenReady(timeout time.Duration, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return runner.WhenReady(s, timeout)
+	return runner.WhenReady(timeout, s)
 }
 
 // WhenAllReady waits until all services in the global runner have started.
@@ -146,12 +161,12 @@ func WhenAllReady(timeout time.Duration, ss ...service.Service) error {
 	return service.WhenAllReady(runner, timeout, ss...)
 }
 
-func EnsureHalt(s service.Service, timeout time.Duration) error {
-	return service.EnsureHalt(Runner(), s, timeout)
+func EnsureHalt(timeout time.Duration, s service.Service) error {
+	return service.EnsureHalt(Runner(), timeout, s)
 }
 
-func MustEnsureHalt(s service.Service, timeout time.Duration) {
-	service.MustEnsureHalt(Runner(), s, timeout)
+func MustEnsureHalt(timeout time.Duration, s service.Service) {
+	service.MustEnsureHalt(Runner(), timeout, s)
 }
 
 func getListener() *listenerDispatcher {
@@ -159,4 +174,32 @@ func getListener() *listenerDispatcher {
 	l := listener
 	lock.RUnlock()
 	return l
+}
+
+type Starter struct {
+	service.Service
+}
+
+func (s Starter) StartWaitListen(timeout time.Duration, l service.Listener) error {
+	svc := s.Service
+	s.Service = nil
+	return StartWaitListen(timeout, l, svc)
+}
+
+func (s Starter) StartWait(timeout time.Duration) error {
+	svc := s.Service
+	s.Service = nil
+	return StartWait(timeout, svc)
+}
+
+func (s Starter) StartListen(l service.Listener) error {
+	svc := s.Service
+	s.Service = nil
+	return StartListen(l, svc)
+}
+
+func (s Starter) Start() error {
+	svc := s.Service
+	s.Service = nil
+	return Start(svc)
 }

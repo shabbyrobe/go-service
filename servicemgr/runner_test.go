@@ -24,13 +24,13 @@ func TestStart(t *testing.T) {
 	// See notes in go-service/runner_test.go about startDelay
 	s1 := &dummyService{runTime: 100 * tscale, startDelay: 2 * tscale}
 
-	tt.MustOK(Start(s1, nil))
+	tt.MustOK(StartListen(nil, s1))
 	tt.MustAssert(State(s1) == service.Starting)
 
-	tt.MustOK(WhenReady(s1, dto))
+	tt.MustOK(WhenReady(dto, s1))
 	tt.MustAssert(State(s1) == service.Started)
 
-	tt.MustOK(Halt(s1, dto))
+	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
 }
 
@@ -41,15 +41,15 @@ func TestStartWait(t *testing.T) {
 
 	s1 := &dummyService{runTime: 100 * tscale}
 
-	tt.MustOK(StartWait(s1, nil, 10*tscale))
+	tt.MustOK(StartWaitListen(10*tscale, nil, s1))
 	tt.MustAssert(State(s1) == service.Started)
-	tt.MustOK(WhenReady(s1, dto))
+	tt.MustOK(WhenReady(dto, s1))
 
-	tt.MustOK(Halt(s1, dto))
+	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
 }
 
-func TestUnregister(t *testing.T) {
+func TestRegisterUnregister(t *testing.T) {
 	defer Reset()
 
 	tt := assert.WrapTB(t)
@@ -57,15 +57,22 @@ func TestUnregister(t *testing.T) {
 	s1 := &dummyService{runTime: 100 * tscale}
 
 	l := newTestingListener(0)
-	tt.MustOK(StartWait(s1, l, 10*tscale))
+	tt.MustOK(Register(s1).StartWaitListen(10*tscale, l))
 	tt.MustEqual(1, len(getListener().listeners))
-	tt.MustOK(Halt(s1, dto))
+	tt.MustEqual(1, len(Services(service.FindRegistered)))
+
+	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
+
+	tt.MustEqual(1, len(Services(service.FindRegistered)))
 	tt.MustOK(Unregister(s1))
+	tt.MustEqual(0, len(Services(service.FindRegistered)))
+	tt.MustEqual(0, len(Services(service.FindUnregistered)))
+
 	tt.MustEqual(0, len(getListener().listeners))
 }
 
-func TestListenerEnds(t *testing.T) {
+func TestListenerEndsOnHalt(t *testing.T) {
 	defer Reset()
 
 	tt := assert.WrapTB(t)
@@ -73,11 +80,10 @@ func TestListenerEnds(t *testing.T) {
 	s1 := &dummyService{runTime: 100 * tscale}
 
 	l := newTestingListener(1)
-	tt.MustOK(StartWait(s1, l, 10*tscale))
+	tt.MustOK(StartWaitListen(10*tscale, l, s1))
 	tt.MustEqual(1, len(getListener().listeners))
-	tt.MustOK(Halt(s1, dto))
+	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
-	tt.MustOK(Unregister(s1))
 
 	lerr := <-l.ends
 	tt.MustOK(lerr.err)
@@ -93,8 +99,8 @@ func TestListenerShared(t *testing.T) {
 	s2 := &dummyService{runTime: 100 * tscale}
 
 	l := newTestingListener(2)
-	tt.MustOK(StartWait(s1, l, 10*tscale))
-	tt.MustOK(StartWait(s2, l, 10*tscale))
+	tt.MustOK(StartWaitListen(10*tscale, l, s1))
+	tt.MustOK(StartWaitListen(10*tscale, l, s2))
 	tt.MustEqual(2, len(getListener().listeners))
 
 	tt.MustOK(HaltAll(dto))
@@ -118,13 +124,15 @@ func TestListenerServices(t *testing.T) {
 	s1 := &dummyService{runTime: 100 * tscale}
 	s2 := &dummyService{runTime: 100 * tscale}
 
-	tt.MustOK(StartWait(s1, nil, 10*tscale))
-	tt.MustOK(StartWait(s2, nil, 10*tscale))
+	tt.MustOK(StartWait(10*tscale, s1))
+	tt.MustOK(StartWait(10*tscale, s2))
 	tt.MustEqual(0, len(getListener().listeners))
+
+	tt.MustEqual([]service.Service{s1, s2}, Services(service.AnyState))
 
 	tt.MustOK(HaltAll(dto))
 	tt.MustAssert(State(s1) == service.Halted)
 	tt.MustAssert(State(s2) == service.Halted)
 
-	tt.MustEqual([]service.Service{s1, s2}, Services(service.AnyState))
+	tt.MustEqual([]service.Service{}, Services(service.AnyState))
 }

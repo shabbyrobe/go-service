@@ -12,7 +12,7 @@ type Runner interface {
 	State(s Service) State
 
 	// StartWait is a shorthand for calling Start() then WhenReady()
-	StartWait(s Service, timeout time.Duration) error
+	StartWait(timeout time.Duration, s Service) error
 
 	// Start a service in this runner. The runner will retain a reference to it
 	// until Unregister is called even if the service is Halted.
@@ -32,11 +32,11 @@ type Runner interface {
 	//
 	// It returns nil if ctx.Ready() was successfully called, and an error in
 	// all other cases.
-	WhenReady(s Service, timeout time.Duration) error
+	WhenReady(timeout time.Duration, s Service) error
 
 	// Halt a service started in this runner. The runner will retain a
 	// reference to it until Unregister is called.
-	Halt(s Service, timeout time.Duration) error
+	Halt(timeout time.Duration, s Service) error
 
 	// HaltAll halts all services started in this runner. The runner will retain
 	// references to the services until Unregister is called.
@@ -84,8 +84,8 @@ type Listener interface {
 	OnServiceState(service Service, state State)
 }
 
-func EnsureHalt(r Runner, s Service, timeout time.Duration) error {
-	err := r.Halt(s, timeout)
+func EnsureHalt(r Runner, timeout time.Duration, s Service) error {
+	err := r.Halt(timeout, s)
 	if err == nil {
 		return nil
 	}
@@ -100,14 +100,14 @@ func EnsureHalt(r Runner, s Service, timeout time.Duration) error {
 // MustEnsureHalt allows Runner.Halt() to be called in a defer, but only if
 // it is acceptable to crash the server if the service does not Halt.
 // EnsureHalt is used to prevent an error if the service is already halted.
-func MustEnsureHalt(r Runner, s Service, timeout time.Duration) {
+func MustEnsureHalt(r Runner, timeout time.Duration, s Service) {
 	if s == nil {
 		return
 	}
 	if timeout <= 0 {
 		panic(fmt.Errorf("service: MustHalt timeout must be > 0"))
 	}
-	if err := EnsureHalt(r, s, timeout); err != nil {
+	if err := EnsureHalt(r, timeout, s); err != nil {
 		panic(err)
 	}
 }
@@ -115,7 +115,7 @@ func MustEnsureHalt(r Runner, s Service, timeout time.Duration) {
 func WhenAllReady(r Runner, timeout time.Duration, ss ...Service) error {
 	var errs []error
 	for _, s := range ss {
-		if err := r.WhenReady(s, timeout); err != nil {
+		if err := r.WhenReady(timeout, s); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -188,18 +188,20 @@ func (r *runner) Services(query StateQuery) []Service {
 // you shoud attempt to Halt() the service. If the service does not successfully
 // halt, you MUST panic.
 //
-func (r *runner) StartWait(service Service, timeout time.Duration) (err error) {
+func (r *runner) StartWait(timeout time.Duration, service Service) (err error) {
 	if timeout <= 0 {
 		return fmt.Errorf("service: start timeout must be > 0")
 	}
 	if err := r.Start(service); err != nil {
 		return err
 	}
-
-	return r.WhenReady(service, timeout)
+	return r.WhenReady(timeout, service)
 }
 
 func (r *runner) Start(service Service) (err error) {
+	if service == nil {
+		return fmt.Errorf("nil service")
+	}
 	if err = r.Starting(service); err != nil {
 		return err
 	}
@@ -251,7 +253,11 @@ func (r *runner) runnerState(service Service) *runnerState {
 	return r.states[service]
 }
 
-func (r *runner) Halt(service Service, timeout time.Duration) error {
+func (r *runner) Halt(timeout time.Duration, service Service) error {
+	if service == nil {
+		return fmt.Errorf("nil service")
+	}
+
 	if err := r.Halting(service); err != nil {
 		return err
 	}
@@ -464,7 +470,11 @@ func (r *runner) Unregister(service Service) error {
 	return nil
 }
 
-func (r *runner) WhenReady(service Service, limit time.Duration) error {
+func (r *runner) WhenReady(limit time.Duration, service Service) error {
+	if service == nil {
+		return fmt.Errorf("nil service")
+	}
+
 	errc := func() chan error {
 		r.statesLock.Lock()
 		defer r.statesLock.Unlock()

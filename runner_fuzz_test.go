@@ -407,7 +407,7 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 	r.wg.Add(1)
 	time.AfterFunc(r.ServiceHaltAfter.Rand(), func() {
 		defer r.wg.Done()
-		err := runner.Halt(service, r.ServiceHaltTimeout.Rand())
+		err := runner.Halt(r.ServiceHaltTimeout.Rand(), service)
 		stats.ServiceHalt.Add(err)
 
 		if err == nil && willRegister {
@@ -432,7 +432,7 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 		}
 
 		if should(r.StartWaitChance) {
-			err := runner.StartWait(service, r.StartWaitTimeout.Rand())
+			err := runner.StartWait(r.StartWaitTimeout.Rand(), service)
 			stats.ServiceStartWait.Add(err)
 		} else {
 			err := runner.Start(service)
