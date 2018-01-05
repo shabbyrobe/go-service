@@ -18,7 +18,7 @@ Key features:
 It is loosely based on .NET/Java style thread classes.
 
 Here's a quick example (though the
-[godoc](https://godoc.org/github.com/shabbyrobe/golib/service) contains MUCH
+[godoc](https://godoc.org/github.com/shabbyrobe/go-service) contains MUCH
 more information):
 
 ```go
