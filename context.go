@@ -11,6 +11,7 @@ type Context interface {
 	// Halt returns a channel which will be closed when the service should
 	// halt. All services should either include this channel in their select
 	// loop, or regularly poll Halted().
+	// It is safe to add this channel to more than one select loop.
 	Halt() <-chan struct{}
 
 	// Halted returns true if the service has been instructed to halt by
