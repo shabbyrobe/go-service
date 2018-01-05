@@ -13,7 +13,6 @@ Key features:
 - Start and halt backgrounded goroutines (services)
 - Check the state of services
 - Service groups (should start and halt together)
-- A WaitGroup implementation with fewer caveats (also it's a bit slower)
 
 It is loosely based on .NET/Java style thread classes.
 

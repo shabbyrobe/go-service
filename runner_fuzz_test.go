@@ -920,6 +920,9 @@ func should(chance float64) bool {
 //
 // Unlike sync.WaitGroup, new Add calls can occur before all previous waits
 // have returned.
+//
+// This is copy-pastad in from golib, don't export it.
+//
 type condGroup struct {
 	count int
 	lock  sync.Mutex
