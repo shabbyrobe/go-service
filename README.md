@@ -1,7 +1,7 @@
 Goroutine lifecycle management: service
 =======================================
 
-[![GoDoc](https://godoc.org/github.com/shabbyrobe/golib/service?status.svg)](https://godoc.org/github.com/shabbyrobe/golib/service)
+[![GoDoc](https://godoc.org/github.com/shabbyrobe/go-service?status.svg)](https://godoc.org/github.com/shabbyrobe/go-service)
 
 service implements service-like goroutine lifecycle management.
 
