@@ -15,7 +15,7 @@ Quick Example
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		<-ctx.Halt()
+		<-ctx.Done()
 		return nil
 	}
 
@@ -68,10 +68,10 @@ will result in Undefined Behaviour (uh-oh!):
 
 	- ctx.Ready() MUST be called and error checked properly
 
-	- <-ctx.Halt() MUST be included in any select {} block
+	- <-ctx.Done() MUST be included in any select {} block
 
-	- ctx.Halted() MUST be checked more frequently than your application's halt
-	  timeout if <-ctx.Halt() is not used.
+	- ctx.IsDone() MUST be checked more frequently than your application's halt
+	  timeout if <-ctx.Done() is not used.
 
 	- If Run() ends before it is halted by a Runner, an error MUST be returned.
 	  If there is no obvious application specific error to return in this case,
@@ -91,7 +91,7 @@ Here is an example of a Run() method which uses a select{} loop:
 			select {
 			case stuff := <-m.channelOfStuff:
 				m.doThingsWithTheStuff(stuff)
-			case <-ctx.Halt():
+			case <-ctx.Done():
 				return nil
 			}
 		}
@@ -103,7 +103,7 @@ Here is an example of a Run() method which sleeps:
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		for !ctx.Halted() {
+		for !ctx.IsDone() {
 			m.doThingsWithTheStuff(stuff)
 			service.Sleep(ctx, 1 * time.Second)
 		}
@@ -212,7 +212,7 @@ is a good way to prevent it:
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		<-ctx.Halt()
+		<-ctx.Done()
 		return nil
 	}
 

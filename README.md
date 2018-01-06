@@ -29,7 +29,7 @@ func (m *MyService) Run(ctx service.Context) error {
     if err := ctx.Ready(); err != nil {
         return err
     }
-    <-ctx.Halt()
+    <-ctx.Done()
     return nil
 }
 

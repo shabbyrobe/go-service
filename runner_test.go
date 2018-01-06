@@ -608,7 +608,7 @@ func TestRunnerServiceFunc(t *testing.T) {
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		<-ctx.Halt()
+		<-ctx.Done()
 		return nil
 	})
 

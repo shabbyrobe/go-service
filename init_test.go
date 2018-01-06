@@ -298,7 +298,7 @@ func (d *dummyService) Run(ctx Context) error {
 			time.Sleep(d.runTime)
 		}
 	}
-	if ctx.Halted() {
+	if ctx.IsDone() {
 		if d.haltDelay > 0 {
 			time.Sleep(d.haltDelay)
 		}
@@ -359,7 +359,7 @@ func (d *errorService) Run(ctx Context) error {
 		select {
 		case err := <-d.errc:
 			ctx.OnError(err)
-		case <-ctx.Halt():
+		case <-ctx.Done():
 			return nil
 		}
 	}
@@ -435,7 +435,7 @@ func (d *blockingService) Run(ctx Context) error {
 		return err
 	}
 
-	<-ctx.Halt()
+	<-ctx.Done()
 	if d.haltDelay > 0 {
 		time.Sleep(d.haltDelay)
 	}

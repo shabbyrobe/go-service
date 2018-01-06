@@ -78,7 +78,7 @@ func (g *Group) Run(ctx Context) error {
 	}
 
 	select {
-	case <-ctx.Halt():
+	case <-ctx.Done():
 	case lerr := <-listener.errs:
 		ctx.OnError(WrapError(lerr, g))
 	case err = <-listener.ends:

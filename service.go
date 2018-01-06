@@ -10,7 +10,7 @@ type Service interface {
 	// Run the service, blocking the caller until the service is complete.
 	// ready MUST not be nil. ctx.Ready() MUST be called.
 	//
-	// If Run() ends because <-ctx.Halt() has yielded, you MUST return nil.
+	// If Run() ends because <-ctx.Done() has yielded, you MUST return nil.
 	// If Run() ends for any other reason, you MUST return an error.
 	Run(ctx Context) error
 
@@ -24,7 +24,7 @@ type Service interface {
 //		if err := ctx.Ready(); err != nil {
 //			return err
 //		}
-//		<-ctx.Halt()
+//		<-ctx.Done()
 //		return nil
 //	}))
 //

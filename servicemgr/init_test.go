@@ -76,7 +76,7 @@ func (d *dummyService) Run(ctx service.Context) error {
 	if d.runTime > 0 {
 		service.Sleep(ctx, d.runTime)
 	}
-	if ctx.Halted() {
+	if ctx.IsDone() {
 		if d.haltDelay > 0 {
 			time.Sleep(d.haltDelay)
 		}

@@ -131,7 +131,7 @@ type runnerState struct {
 	readyCalled    int32
 	retain         bool
 	ready          chan error
-	halt           chan struct{}
+	done           chan struct{}
 	halted         chan struct{}
 }
 
@@ -207,7 +207,7 @@ func (r *runner) Start(service Service) (err error) {
 	}
 
 	rs := r.runnerState(service)
-	ctx := newContext(service, r.Ready, r.OnError, rs.halt)
+	ctx := newContext(service, r.Ready, r.OnError, rs.done)
 
 	go func() {
 		err := service.Run(ctx)
@@ -266,7 +266,7 @@ func (r *runner) Halt(timeout time.Duration, service Service) error {
 	if rs == nil {
 		panic("runnerState should not be nil!")
 	}
-	close(rs.halt)
+	close(rs.done)
 
 	after := Timeout(timeout)
 	select {
@@ -294,7 +294,7 @@ func (r *runner) HaltAll(timeout time.Duration) error {
 			return WrapError(err, service)
 		}
 		rs := r.runnerState(service)
-		close(rs.halt)
+		close(rs.done)
 
 		after := Timeout(timeout)
 		select {
@@ -329,7 +329,7 @@ func (r *runner) Starting(service Service) error {
 
 	svc.SetStartingCalled(true)
 	svc.ready = make(chan error, 1)
-	svc.halt = make(chan struct{})
+	svc.done = make(chan struct{})
 	svc.halted = make(chan struct{})
 
 	if r.listener != nil {
