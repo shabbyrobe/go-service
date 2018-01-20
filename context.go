@@ -28,6 +28,30 @@ type Context interface {
 	OnError(err error)
 }
 
+type ForegroundContext interface {
+	Context
+	Halt()
+}
+
+type foregroundContext struct {
+	context
+}
+
+func (f *foregroundContext) Halt() {
+	close(f.done)
+}
+
+func Foreground() ForegroundContext {
+	ctx := &foregroundContext{
+		context: context{
+			done:      make(chan struct{}),
+			readyFunc: func(service Service) error { return nil },
+			errFunc:   func(service Service, err error) {},
+		},
+	}
+	return ctx
+}
+
 // Sleep allows a service to perform an interruptible sleep - it will
 // return early if the service is halted.
 func Sleep(ctx Context, d time.Duration) (halted bool) {
