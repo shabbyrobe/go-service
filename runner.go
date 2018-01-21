@@ -380,13 +380,17 @@ func (r *runner) ended(service Service) error {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
-	if err := r.states[service].changer.SetHalting(nil); IsErrNotRunning(err) {
+	rs := r.states[service]
+
+	if err := rs.changer.SetHalting(nil); IsErrNotRunning(err) {
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	if err := r.states[service].changer.SetHalted(nil); err != nil {
+	close(rs.done)
+
+	if err := rs.changer.SetHalted(nil); err != nil {
 		return err
 	}
 

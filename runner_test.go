@@ -623,3 +623,83 @@ func TestRunnerServiceFunc(t *testing.T) {
 	tt.MustOK(r.WhenReady(dto, s1))
 	tt.MustOK(r.Halt(dto, s1))
 }
+
+func TestRunnerServiceWithHaltingGoroutines(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	var c uint32
+	yep := make(chan struct{})
+
+	ready := make(chan struct{})
+	s1 := Func("test", func(ctx Context) error {
+		<-ready
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		go func() {
+			<-ctx.Done()
+			atomic.AddUint32(&c, 1)
+			close(yep)
+		}()
+		<-ctx.Done()
+		return nil
+	})
+
+	r := NewRunner(newDummyListener())
+
+	tt.MustOK(r.Start(s1))
+	tt.MustEqual(Starting, r.State(s1))
+	mustStateError(tt, r.Start(s1), Halted, Starting)
+
+	close(ready)
+
+	tt.MustOK(r.WhenReady(dto, s1))
+	tt.MustOK(r.Halt(dto, s1))
+
+	select {
+	case <-yep:
+	case <-time.After(2 * time.Second):
+		panic("timeout waiting for nested goroutine to stop")
+	}
+}
+
+func TestRunnerServiceWithHaltingGoroutinesOnEndError(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	var c uint32
+	yep := make(chan struct{})
+
+	ready := make(chan struct{})
+	s1 := Func("test", func(ctx Context) error {
+		<-ready
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		go func() {
+			<-ctx.Done()
+			atomic.AddUint32(&c, 1)
+			close(yep)
+		}()
+		return fmt.Errorf("nup")
+	})
+
+	r := NewRunner(newDummyListener())
+
+	tt.MustOK(r.Start(s1))
+	tt.MustEqual(Starting, r.State(s1))
+	mustStateError(tt, r.Start(s1), Halted, Starting)
+
+	close(ready)
+
+	tt.MustOK(r.WhenReady(dto, s1))
+
+	select {
+	case <-yep:
+	case <-time.After(2 * time.Second):
+		panic("timeout waiting for nested goroutine to stop")
+	}
+}
