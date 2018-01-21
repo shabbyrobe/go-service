@@ -65,3 +65,26 @@ func (g *listenerDispatcher) OnServiceState(service service.Service, state servi
 		g.defaultListener.OnServiceState(service, state)
 	}
 }
+
+type listenerEnder struct {
+	ender chan error
+}
+
+func newListenerEnder() *listenerEnder {
+	return &listenerEnder{
+		ender: make(chan error, 1),
+	}
+}
+
+func (e *listenerEnder) OnServiceError(service service.Service, err service.Error) {}
+
+func (e *listenerEnder) OnServiceEnd(service service.Service, err service.Error) {
+	if err != nil {
+		select {
+		case e.ender <- err:
+		default:
+		}
+	}
+}
+
+func (e *listenerEnder) OnServiceState(service service.Service, state service.State) {}
