@@ -1,6 +1,8 @@
 package servicemgr
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +182,24 @@ func EnsureHalt(timeout time.Duration, s service.Service) error {
 
 func MustEnsureHalt(timeout time.Duration, s service.Service) {
 	service.MustEnsureHalt(Runner(), timeout, s)
+}
+
+func MustEnsureHaltAll(timeout time.Duration, ss ...service.Service) {
+	var msgs []string
+	r := Runner()
+	for _, s := range ss {
+		cerr := service.EnsureHalt(r, timeout, s)
+		if cerr != nil {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", s.ServiceName(), cerr.Error()))
+		}
+	}
+	if len(msgs) > 0 {
+		panic(fmt.Errorf("haltall failed:\n%s", strings.Join(msgs, "\n")))
+	}
+}
+
+func MustShutdown(timeout time.Duration) {
+	MustEnsureHaltAll(timeout, Runner().Services(service.FindRunning)...)
 }
 
 func getListener() *listenerDispatcher {
