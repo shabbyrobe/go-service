@@ -28,28 +28,46 @@ type Context interface {
 	OnError(err error)
 }
 
-type ForegroundContext interface {
+type RunContext interface {
 	Context
 	Halt()
 }
 
-type foregroundContext struct {
+type runContext struct {
 	context
 }
 
-func (f *foregroundContext) Halt() {
+func (f *runContext) Halt() {
 	close(f.done)
 }
 
-func Foreground() ForegroundContext {
-	ctx := &foregroundContext{
+// StandaloneWithErrorHandler returns a RunContext you can pass to Service.Run() if you
+// want to run the service outside a Runner.
+//
+// When non-halting errors are encountered, they are passed to errFunc. Halting errors
+// are still returned by Run().
+//
+func StandaloneWithErrorHandler(errFunc func(service Service, err error)) RunContext {
+	if errFunc == nil {
+		errFunc = emptyErrFunc
+	}
+	ctx := &runContext{
 		context: context{
 			done:      make(chan struct{}),
 			readyFunc: func(service Service) error { return nil },
-			errFunc:   func(service Service, err error) {},
+			errFunc:   errFunc,
 		},
 	}
 	return ctx
+}
+
+// Standalone returns a RunContext you can pass to Service.Run() if you
+// want to run the service outside a Runner.
+//
+// Non-halting errors are swallowed.
+//
+func Standalone() RunContext {
+	return StandaloneWithErrorHandler(nil)
 }
 
 // Sleep allows a service to perform an interruptible sleep - it will
@@ -76,6 +94,9 @@ type (
 	readyFunc func(service Service) error
 	errFunc   func(service Service, err error)
 )
+
+var emptyErrFunc = func(service Service, err error) {}
+var emptyReadyFunc = func(service Service) {}
 
 func newContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan struct{}) Context {
 	return &context{
