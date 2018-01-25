@@ -28,48 +28,6 @@ type Context interface {
 	OnError(err error)
 }
 
-type RunContext interface {
-	Context
-	Halt()
-}
-
-type runContext struct {
-	context
-}
-
-func (f *runContext) Halt() {
-	close(f.done)
-}
-
-// StandaloneWithErrorHandler returns a RunContext you can pass to Service.Run() if you
-// want to run the service outside a Runner.
-//
-// When non-halting errors are encountered, they are passed to errFunc. Halting errors
-// are still returned by Run().
-//
-func StandaloneWithErrorHandler(errFunc func(service Service, err error)) RunContext {
-	if errFunc == nil {
-		errFunc = emptyErrFunc
-	}
-	ctx := &runContext{
-		context: context{
-			done:      make(chan struct{}),
-			readyFunc: func(service Service) error { return nil },
-			errFunc:   errFunc,
-		},
-	}
-	return ctx
-}
-
-// Standalone returns a RunContext you can pass to Service.Run() if you
-// want to run the service outside a Runner.
-//
-// Non-halting errors are swallowed.
-//
-func Standalone() RunContext {
-	return StandaloneWithErrorHandler(nil)
-}
-
 // Sleep allows a service to perform an interruptible sleep - it will
 // return early if the service is halted.
 func Sleep(ctx Context, d time.Duration) (halted bool) {
@@ -90,13 +48,71 @@ func Sleep(ctx Context, d time.Duration) (halted bool) {
 	}
 }
 
+type RunContext interface {
+	Context
+	Halt()
+
+	WhenReady(func(svc Service) error) RunContext
+	WhenError(func(svc Service, err error)) RunContext
+}
+
 type (
 	readyFunc func(service Service) error
 	errFunc   func(service Service, err error)
 )
 
 var emptyErrFunc = func(service Service, err error) {}
-var emptyReadyFunc = func(service Service) {}
+var emptyReadyFunc = func(service Service) error { return nil }
+
+type runContext struct {
+	context
+}
+
+func (f *runContext) Halt() {
+	close(f.done)
+}
+
+func (f *runContext) WhenReady(readyFunc func(svc Service) error) RunContext {
+	if readyFunc != nil {
+		f.readyFunc = readyFunc
+	} else {
+		f.readyFunc = emptyReadyFunc
+	}
+	return f
+}
+
+func (f *runContext) WhenError(errFunc func(svc Service, err error)) RunContext {
+	if errFunc != nil {
+		f.errFunc = errFunc
+	} else {
+		f.errFunc = emptyErrFunc
+	}
+	return f
+}
+
+// Standalone returns a RunContext you can pass to Service.Run() if you
+// want to run the service outside a Runner.
+//
+// If you want to capture ready signals, see WhenReady(). To capture
+// non-halting error signals, see WhenError().
+//
+func Standalone() RunContext {
+	ctx := &runContext{
+		context: context{
+			done:      make(chan struct{}),
+			readyFunc: emptyReadyFunc,
+			errFunc:   emptyErrFunc,
+		},
+	}
+	return ctx
+}
+
+type context struct {
+	service   Service
+	readyFunc readyFunc
+	errFunc   errFunc
+	done      chan struct{}
+}
 
 func newContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan struct{}) Context {
 	return &context{
@@ -105,13 +121,6 @@ func newContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan
 		readyFunc: readyFunc,
 		errFunc:   errFunc,
 	}
-}
-
-type context struct {
-	service   Service
-	readyFunc readyFunc
-	errFunc   errFunc
-	done      chan struct{}
 }
 
 func (c *context) Ready() error { return c.readyFunc(c.service) }
