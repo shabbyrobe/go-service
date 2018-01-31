@@ -89,14 +89,6 @@ func (d *dummyService) Run(ctx service.Context) error {
 	}
 }
 
-var _ service.Listener = &testingListener{}
-
-type testingListener struct {
-	errors chan listenerErr
-	ends   chan listenerErr
-	states chan listenerState
-}
-
 type listenerErr struct {
 	service service.Service
 	err     service.Error
@@ -107,21 +99,40 @@ type listenerState struct {
 	state   service.State
 }
 
-func newTestingListener(cap int) *testingListener {
-	return &testingListener{
-		ends:   make(chan listenerErr, cap),
-		errors: make(chan listenerErr, cap),
-		states: make(chan listenerState, cap),
+type testingFullListener struct {
+	*testingListener
+	*testingNonHaltingErrorListener
+	*testingStateListener
+}
+
+func newTestingFullListener(cap int) *testingFullListener {
+	return &testingFullListener{
+		testingListener:                newTestingListener(cap),
+		testingNonHaltingErrorListener: newTestingNonHaltingErrorListener(cap),
+		testingStateListener:           newTestingStateListener(cap),
 	}
 }
 
-func (t *testingListener) OnServiceError(service service.Service, err service.Error) {
-	panic(nil)
-	select {
-	case t.errors <- listenerErr{service: service, err: err}:
-	default:
+var (
+	_ service.Listener        = &testingFullListener{}
+	_ Listener                = &testingFullListener{}
+	_ NonHaltingErrorListener = &testingFullListener{}
+	_ StateListener           = &testingFullListener{}
+
+	_ Listener = &testingListener{}
+)
+
+type testingListener struct {
+	ends chan listenerErr
+}
+
+func newTestingListener(cap int) *testingListener {
+	return &testingListener{
+		ends: make(chan listenerErr, cap),
 	}
 }
+
+var _ Listener = &testingListener{}
 
 func (t *testingListener) OnServiceEnd(service service.Service, err service.Error) {
 	select {
@@ -130,7 +141,42 @@ func (t *testingListener) OnServiceEnd(service service.Service, err service.Erro
 	}
 }
 
-func (t *testingListener) OnServiceState(service service.Service, state service.State) {
+type testingNonHaltingErrorListener struct {
+	*testingListener
+	errors chan listenerErr
+}
+
+func newTestingNonHaltingErrorListener(cap int) *testingNonHaltingErrorListener {
+	return &testingNonHaltingErrorListener{
+		testingListener: newTestingListener(cap),
+		errors:          make(chan listenerErr, cap),
+	}
+}
+
+var _ NonHaltingErrorListener = &testingNonHaltingErrorListener{}
+
+func (t *testingNonHaltingErrorListener) OnServiceError(service service.Service, err service.Error) {
+	select {
+	case t.ends <- listenerErr{service: service, err: err}:
+	default:
+	}
+}
+
+type testingStateListener struct {
+	*testingListener
+	states chan listenerState
+}
+
+func newTestingStateListener(cap int) *testingStateListener {
+	return &testingStateListener{
+		testingListener: newTestingListener(cap),
+		states:          make(chan listenerState, cap),
+	}
+}
+
+var _ StateListener = &testingStateListener{}
+
+func (t *testingStateListener) OnServiceState(service service.Service, state service.State) {
 	select {
 	case t.states <- listenerState{service: service, state: state}:
 	default:

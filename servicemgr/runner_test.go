@@ -81,9 +81,12 @@ func TestRegisterUnregister(t *testing.T) {
 
 	s1 := &dummyService{runTime: 100 * tscale}
 
-	l := newTestingListener(0)
+	l := newTestingFullListener(0)
 	tt.MustOK(Register(s1).StartWaitListen(10*tscale, l))
 	tt.MustEqual(1, len(getListener().listeners))
+	tt.MustEqual(1, len(getListener().listenersNHError))
+	tt.MustEqual(1, len(getListener().listenersState))
+
 	tt.MustEqual(1, len(Services(service.FindRegistered)))
 
 	tt.MustOK(Halt(dto, s1))
@@ -95,6 +98,8 @@ func TestRegisterUnregister(t *testing.T) {
 	tt.MustEqual(0, len(Services(service.FindUnregistered)))
 
 	tt.MustEqual(0, len(getListener().listeners))
+	tt.MustEqual(0, len(getListener().listenersNHError))
+	tt.MustEqual(0, len(getListener().listenersState))
 }
 
 func TestListenerEndsOnHalt(t *testing.T) {
@@ -123,7 +128,7 @@ func TestListenerShared(t *testing.T) {
 	s1 := &dummyService{runTime: 100 * tscale}
 	s2 := &dummyService{runTime: 100 * tscale}
 
-	l := newTestingListener(2)
+	l := newTestingFullListener(2)
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
 	tt.MustOK(StartWaitListen(10*tscale, l, s2))
 	tt.MustEqual(2, len(getListener().listeners))

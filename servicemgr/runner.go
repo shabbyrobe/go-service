@@ -60,7 +60,7 @@ func State(s service.Service) service.State {
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartWaitListen(timeout time.Duration, l service.Listener, s service.Service) error {
+func StartWaitListen(timeout time.Duration, l Listener, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
