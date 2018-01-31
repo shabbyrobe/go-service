@@ -76,14 +76,6 @@ func StartWait(timeout time.Duration, s service.Service) error {
 	return StartWaitListen(timeout, nil, s)
 }
 
-// StartWaitEnder is an experimental method that calls StartWait that also returns
-// a channel that will receive an error if Listener.OnServiceEnd was called
-// with a non-nil error.
-func StartWaitEnder(timeout time.Duration, s service.Service) (ender <-chan error, err error) {
-	l := newListenerEnder()
-	return l.ender, StartWaitListen(timeout, l, s)
-}
-
 // StartListen starts a service in the global runner.
 //
 // You may also provide an optional Listener (which may be the service itself),
@@ -106,11 +98,6 @@ func StartListen(l service.Listener, s service.Service) error {
 
 func Start(s service.Service) error {
 	return StartListen(nil, s)
-}
-
-func StartEnder(s service.Service) (err error, ender <-chan error) {
-	l := newListenerEnder()
-	return StartListen(l, s), l.ender
 }
 
 // Halt halts a service in the global runner.

@@ -1,7 +1,6 @@
 package servicemgr
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -48,30 +47,6 @@ func TestStartWait(t *testing.T) {
 
 	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
-}
-
-func TestStartWaitEnder(t *testing.T) {
-	defer Reset()
-
-	tt := assert.WrapTB(t)
-
-	e1 := fmt.Errorf("done")
-	s1 := service.Func("test", func(ctx service.Context) error {
-		if err := ctx.Ready(); err != nil {
-			return err
-		}
-		return e1
-	})
-
-	ender, err := StartWaitEnder(10*tscale, s1)
-	tt.MustOK(err)
-	var rerr error
-	select {
-	case rerr = <-ender:
-	case <-time.After(2*time.Second + 10*tscale):
-		panic("timeout waiting for end")
-	}
-	tt.MustEqual(e1, rerr.(interface{ Cause() error }).Cause())
 }
 
 func TestRegisterUnregister(t *testing.T) {
