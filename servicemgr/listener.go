@@ -65,31 +65,37 @@ func (g *listenerDispatcher) Remove(service service.Service) {
 
 func (g *listenerDispatcher) OnServiceError(service service.Service, err service.Error) {
 	g.lock.Lock()
-	defer g.lock.Unlock()
-	if sl, ok := g.listenersNHError[service]; ok {
-		sl.OnServiceError(service, err)
-	} else if g.defaultListener != nil {
-		g.defaultListener.OnServiceError(service, err)
+	l, ok := g.listenersNHError[service]
+	if !ok {
+		l = g.defaultListener
+	}
+	g.lock.Unlock()
+	if l != nil {
+		l.OnServiceError(service, err)
 	}
 }
 
 func (g *listenerDispatcher) OnServiceEnd(service service.Service, err service.Error) {
 	g.lock.Lock()
-	defer g.lock.Unlock()
-	if sl, ok := g.listeners[service]; ok {
-		sl.OnServiceEnd(service, err)
-	} else if g.defaultListener != nil {
-		g.defaultListener.OnServiceEnd(service, err)
+	l, ok := g.listeners[service]
+	if !ok {
+		l = g.defaultListener
+	}
+	g.lock.Unlock()
+	if l != nil {
+		l.OnServiceEnd(service, err)
 	}
 }
 
 func (g *listenerDispatcher) OnServiceState(service service.Service, state service.State) {
 	g.lock.Lock()
-	defer g.lock.Unlock()
-	if sl, ok := g.listenersState[service]; ok {
-		sl.OnServiceState(service, state)
-	} else if g.defaultListener != nil {
-		g.defaultListener.OnServiceState(service, state)
+	l, ok := g.listenersState[service]
+	if !ok {
+		l = g.defaultListener
+	}
+	g.lock.Unlock()
+	if l != nil {
+		l.OnServiceState(service, state)
 	}
 }
 
