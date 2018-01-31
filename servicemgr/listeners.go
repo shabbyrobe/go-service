@@ -25,6 +25,17 @@ func (f *FailureListener) Failures() <-chan error {
 	return f.failures
 }
 
+// SendNonNil sends an arbitrary error through the failure channel if it is not nil.
+// Use it if you want to mix arbitrary goroutine error handling with service failure.
+func (f *FailureListener) SendNonNil(err error) {
+	if err != nil {
+		select {
+		case f.failures <- err:
+		default:
+		}
+	}
+}
+
 func (f *FailureListener) OnServiceEnd(service service.Service, err service.Error) {
 	if err != nil {
 		select {
