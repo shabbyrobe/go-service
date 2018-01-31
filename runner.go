@@ -89,11 +89,19 @@ func EnsureHalt(r Runner, timeout time.Duration, s Service) error {
 	if err == nil {
 		return nil
 	}
-	if serr, ok := err.(*errState); ok && serr.Current == Halted {
+
+	if serr, ok := err.(*errState); ok && !serr.Current.IsRunning() {
+		// Halted and halting are both ignored - if it's Halted, yep obviously
+		// we're fine. If it's Halting, we should assume something else will
+		// take responsibility for failing if the Halt doesn't complete and
+		// return here.
 		return nil
 	} else if IsErrServiceUnknown(err) {
+		// If the service is not retained, it will not be known when we try
+		// to halt it. This is fine.
 		return nil
 	}
+
 	return err
 }
 

@@ -60,6 +60,41 @@ func TestEnsureHalt(t *testing.T) {
 	mustRecv(tt, e2, dto)
 }
 
+func TestEnsureHaltWhileHalting(t *testing.T) {
+	t.Parallel()
+
+	// If we attempt to halt a service which is in the halting state using EnsureHalt,
+	// that should be fine.
+	tt := assert.WrapTB(t)
+
+	s1 := (&blockingService{haltDelay: 10 * tscale}).Init()
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+
+	tt.MustOK(r.StartWait(dto, s1))
+	tt.MustAssert(r.State(s1) == Started)
+
+	done := make(chan struct{})
+	go func() {
+		tt.MustOK(EnsureHalt(r, dto, s1))
+		close(done)
+	}()
+
+	var s State
+	for i := 0; i < 10; i++ {
+		s = r.State(s1)
+		if s == Halting {
+			break
+		} else {
+			time.Sleep(tscale)
+		}
+	}
+
+	tt.MustEqual(Halting, s)
+	tt.MustOK(EnsureHalt(r, dto, s1))
+	<-done
+}
+
 func TestRunnerStartWait(t *testing.T) {
 	t.Parallel()
 
