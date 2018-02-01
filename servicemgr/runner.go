@@ -171,7 +171,7 @@ func MustEnsureHalt(timeout time.Duration, s service.Service) {
 	service.MustEnsureHalt(Runner(), timeout, s)
 }
 
-func MustEnsureHaltAll(timeout time.Duration, ss ...service.Service) {
+func EnsureHaltAll(timeout time.Duration, ss ...service.Service) error {
 	var msgs []string
 	r := Runner()
 	for _, s := range ss {
@@ -181,7 +181,14 @@ func MustEnsureHaltAll(timeout time.Duration, ss ...service.Service) {
 		}
 	}
 	if len(msgs) > 0 {
-		panic(fmt.Errorf("haltall failed:\n%s", strings.Join(msgs, "\n")))
+		return fmt.Errorf("haltall failed:\n%s", strings.Join(msgs, "\n"))
+	}
+	return nil
+}
+
+func MustEnsureHaltAll(timeout time.Duration, ss ...service.Service) {
+	if err := EnsureHaltAll(timeout, ss...); err != nil {
+		panic(err)
 	}
 }
 
