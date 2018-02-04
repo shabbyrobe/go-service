@@ -42,6 +42,15 @@ func (f *FailureListener) SendNonNil(err error) {
 	}
 }
 
+// Send sends an arbitrary error through the failure channel. It can send nil.
+// err is discarded if Send woudl block.
+func (f *FailureListener) Send(err error) {
+	select {
+	case f.failures <- err:
+	default:
+	}
+}
+
 func (f *FailureListener) OnServiceEnd(service service.Service, err service.Error) {
 	if err != nil {
 		select {
@@ -78,6 +87,15 @@ func NewEndListener(cap int) *EndListener {
 
 func (e *EndListener) Ends() <-chan error {
 	return e.ends
+}
+
+// Send sends an arbitrary error through the failure channel. It can send nil.
+// err is discarded if Send woudl block.
+func (f *EndListener) Send(err error) {
+	select {
+	case f.ends <- err:
+	default:
+	}
 }
 
 // SendNonNil sends an arbitrary error through the failure channel if it is not nil.
