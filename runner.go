@@ -398,15 +398,7 @@ func (r *runner) ended(service Service) error {
 
 	close(rs.done)
 
-	if err := rs.changer.SetHalted(nil); err != nil {
-		return err
-	}
-
-	if r.listener != nil {
-		go r.listener.OnServiceState(service, Halted)
-	}
-
-	return nil
+	return r.shutdown(rs, service)
 }
 
 func (r *runner) Halting(service Service) error {
@@ -439,6 +431,10 @@ func (r *runner) halted(service Service) error {
 	if rs == nil {
 		return errServiceUnknown(0)
 	}
+	return r.shutdown(rs, service)
+}
+
+func (r *runner) shutdown(rs *runnerState, service Service) error {
 	if err := rs.changer.SetHalted(nil); err != nil {
 		return err
 	}
@@ -446,7 +442,7 @@ func (r *runner) halted(service Service) error {
 		delete(r.states, service)
 	}
 	if r.listener != nil {
-		go r.listener.OnServiceState(service, Halting)
+		go r.listener.OnServiceState(service, Halted)
 	}
 	return nil
 }

@@ -62,6 +62,7 @@ func (g *Group) Run(ctx Context) error {
 	var err error
 
 	for _, s := range g.services {
+		_ = runner.Register(s)
 		if err = runner.Start(s); err != nil {
 			if herr := runner.HaltAll(g.haltTimeout); herr != nil {
 				return &errGroupHalt{name: g.ServiceName(), haltError: herr, cause: err}

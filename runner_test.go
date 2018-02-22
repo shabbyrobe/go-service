@@ -19,6 +19,13 @@ func mustStateError(tt assert.T, err error, expected State, current State) {
 	tt.MustEqual(current, serr.Current, serr.Error())
 }
 
+func mustStateErrorUnknown(tt assert.T, err error) {
+	tt.Helper()
+	tt.MustAssert(err != nil, "state error not found")
+	_, ok := err.(errServiceUnknown)
+	tt.MustAssert(ok, err)
+}
+
 func mustRecv(tt assert.T, waiter chan struct{}, timeout time.Duration) {
 	tt.Helper()
 	after := time.After(timeout)
@@ -266,7 +273,33 @@ func TestRunnerStartWaitServiceEndsBeforeReady(t *testing.T) {
 	tt.MustEqual(e1, cause(r.StartWait(dto, s1)))
 }
 
-func TestRunnerStartFirstThenStartSecondAfterFirstEnds(t *testing.T) {
+func TestRunnerStartFirstRegisteredThenStartSecondAfterFirstEnds(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	s1 := &dummyService{} // should return immediately
+	s2 := (&blockingService{}).Init()
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+	_ = r.Register(s1)
+
+	ew1 := lc.endWaiter(s1)
+	ew2 := lc.endWaiter(s2)
+
+	tt.MustOK(r.Start(s1))
+	mustRecv(tt, ew1, dto)
+
+	tt.MustOK(r.Start(s2))
+	tt.MustOK(WhenAllReady(r, 1*time.Second, s1, s2))
+	mustStateError(tt, r.Halt(dto, s1), Starting|Started, Halted)
+
+	tt.MustOK(r.Halt(dto, s2))
+	mustRecv(tt, ew2, dto)
+}
+
+func TestRunnerStartFirstUnregisteredThenStartSecondAfterFirstEnds(t *testing.T) {
 	t.Parallel()
 
 	tt := assert.WrapTB(t)
@@ -285,13 +318,42 @@ func TestRunnerStartFirstThenStartSecondAfterFirstEnds(t *testing.T) {
 
 	tt.MustOK(r.Start(s2))
 	tt.MustOK(WhenAllReady(r, 1*time.Second, s1, s2))
+	mustStateErrorUnknown(tt, r.Halt(dto, s1))
+
+	tt.MustOK(r.Halt(dto, s2))
+	mustRecv(tt, ew2, dto)
+}
+
+func TestRunnerStartWaitFirstRegisteredThenStartSecondAfterFirstEnds(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	// We need to make the dummy service run for a little while to make
+	// sure that the End happens after the Ready
+	s1 := &dummyService{runTime: 2 * tscale}
+
+	s2 := (&blockingService{}).Init()
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+	_ = r.Register(s1)
+
+	ew1 := lc.endWaiter(s1)
+	ew2 := lc.endWaiter(s2)
+
+	tt.MustOK(r.StartWait(dto, s1))
+	mustRecv(tt, ew1, dto)
+
+	tt.MustOK(r.Start(s2))
+	tt.MustOK(r.WhenReady(dto, s2))
 	mustStateError(tt, r.Halt(dto, s1), Starting|Started, Halted)
 
 	tt.MustOK(r.Halt(dto, s2))
 	mustRecv(tt, ew2, dto)
 }
 
-func TestRunnerStartWaitFirstThenStartSecondAfterFirstEnds(t *testing.T) {
+func TestRunnerStartWaitFirstUnregisteredThenStartSecondAfterFirstEnds(t *testing.T) {
 	t.Parallel()
 
 	tt := assert.WrapTB(t)
@@ -313,7 +375,7 @@ func TestRunnerStartWaitFirstThenStartSecondAfterFirstEnds(t *testing.T) {
 
 	tt.MustOK(r.Start(s2))
 	tt.MustOK(r.WhenReady(dto, s2))
-	mustStateError(tt, r.Halt(dto, s1), Starting|Started, Halted)
+	mustStateErrorUnknown(tt, r.Halt(dto, s1))
 
 	tt.MustOK(r.Halt(dto, s2))
 	mustRecv(tt, ew2, dto)
@@ -737,4 +799,38 @@ func TestRunnerServiceWithHaltingGoroutinesOnEndError(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		panic("timeout waiting for nested goroutine to stop")
 	}
+}
+
+func TestRunnerServiceHaltedNotRetained(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	s1 := (&blockingService{}).Init()
+	r := NewRunner(nil)
+
+	tt.MustOK(r.Start(s1))
+	MustEnsureHalt(r, dto*10, s1)
+
+	services := r.Services(AnyState)
+	tt.MustEqual(0, len(services))
+}
+
+func TestRunnerServiceEndedNotRetained(t *testing.T) {
+	t.Parallel()
+
+	tt := assert.WrapTB(t)
+
+	s1 := &dummyService{} // should return immediately
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
+	ew := lc.endWaiter(s1)
+
+	tt.MustOK(r.Start(s1))
+	mustRecv(tt, ew, dto)
+	tt.MustEqual([]listenerCollectorEnd{{err: ErrServiceEnded}}, lc.ends(s1))
+
+	services := r.Services(AnyState)
+	tt.MustEqual(0, len(services))
 }
