@@ -113,11 +113,11 @@ func Halt(timeout time.Duration, s service.Service) error {
 // HaltAll halts all services in the global runner.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func HaltAll(timeout time.Duration) (n int, err error) {
+func HaltAll(timeout time.Duration, errlimit int) (n int, err error) {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return runner.HaltAll(timeout)
+	return runner.HaltAll(timeout, errlimit)
 }
 
 // Services lists services in the global runner based on the criteria.

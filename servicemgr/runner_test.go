@@ -108,7 +108,7 @@ func TestListenerShared(t *testing.T) {
 	tt.MustOK(StartWaitListen(10*tscale, l, s2))
 	tt.MustEqual(2, len(getListener().listeners))
 
-	tt.MustOK(HaltAll(dto))
+	tt.MustOK(HaltAll(dto, 0))
 	tt.MustAssert(State(s1) == service.Halted)
 	tt.MustAssert(State(s2) == service.Halted)
 
@@ -135,7 +135,7 @@ func TestListenerServices(t *testing.T) {
 
 	tt.MustEqual([]service.Service{s1, s2}, Services(service.AnyState))
 
-	tt.MustOK(HaltAll(dto))
+	tt.MustOK(HaltAll(dto, 0))
 	tt.MustAssert(State(s1) == service.Halted)
 	tt.MustAssert(State(s2) == service.Halted)
 
