@@ -27,7 +27,7 @@ type Group struct {
 	runnerBuilder func(l Listener) Runner
 }
 
-func NewGroup(name Name, services []Service) *Group {
+func NewGroup(name Name, services ...Service) *Group {
 	return &Group{
 		name:          name,
 		services:      services,
@@ -40,6 +40,7 @@ func NewGroup(name Name, services []Service) *Group {
 type groupListener struct {
 	errs chan Error
 	ends chan Error
+	done <-chan struct{}
 }
 
 func newGroupListener(sz int) *groupListener {
@@ -49,44 +50,63 @@ func newGroupListener(sz int) *groupListener {
 	}
 }
 
-func (l *groupListener) OnServiceError(service Service, err Error)   { l.errs <- err }
-func (l *groupListener) OnServiceEnd(service Service, err Error)     { l.ends <- err }
+func (l *groupListener) OnServiceError(service Service, err Error) {
+	select {
+	case l.errs <- err:
+	case <-l.done:
+	}
+}
+
+func (l *groupListener) OnServiceEnd(service Service, err Error) {
+	select {
+	case l.ends <- err:
+	case <-l.done:
+	}
+}
+
 func (l *groupListener) OnServiceState(service Service, state State) {}
 
 func (g *Group) ServiceName() Name { return g.name }
 
 func (g *Group) Run(ctx Context) error {
 	listener := newGroupListener(len(g.services))
+	listener.done = ctx.Done()
 	runner := g.runnerBuilder(listener)
 
 	var err error
 
+	ready := NewMultiReadySignal(len(g.services))
+
 	for _, s := range g.services {
 		_ = runner.Register(s)
-		if err = runner.Start(s); err != nil {
-			if herr := runner.HaltAll(g.haltTimeout); herr != nil {
+		if err = runner.Start(s, ready); err != nil {
+			if _, herr := runner.HaltAll(g.haltTimeout, 0); herr != nil {
 				return &errGroupHalt{name: g.ServiceName(), haltError: herr, cause: err}
 			}
 			goto done
 		}
 	}
 
-	if err = WhenAllReady(runner, g.readyTimeout, g.services...); err != nil {
+	if err = WhenReady(g.readyTimeout, ready); err != nil {
 		goto done
 	}
 	if err = ctx.Ready(); err != nil {
 		goto done
 	}
 
-	select {
-	case <-ctx.Done():
-	case lerr := <-listener.errs:
-		ctx.OnError(WrapError(lerr, g))
-	case err = <-listener.ends:
+	for {
+		select {
+		case <-ctx.Done():
+			goto done
+		case lerr := <-listener.errs:
+			ctx.OnError(WrapError(lerr, g))
+		case err = <-listener.ends:
+			goto done
+		}
 	}
 
 done:
-	herr := runner.HaltAll(g.haltTimeout)
+	_, herr := runner.HaltAll(g.haltTimeout, 0)
 	if herr == nil {
 		return err
 	} else if err == nil {

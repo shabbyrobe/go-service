@@ -1,0 +1,9 @@
+There's a defect I just can't pin down with StartWait and WhenReady and
+OnServiceEnd if the service is configured to return an error instantly.
+
+To reproduce, edit TestRunnerFuzzMessy like so:
+
+    ServiceStartTime:  TimeRange{500 * time.Microsecond, 500 * time.Microsecond},
+    StartWaitTimeout:  TimeRange{1, 1},
+    ServiceRunTime:    TimeRange{0, 500 * time.Millisecond},
+

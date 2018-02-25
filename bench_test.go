@@ -31,10 +31,10 @@ func benchmarkRunnerStartN(b *testing.B, n int) {
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
 		for i := 0; i < n; i++ {
-			_ = r.Start(svcs[i])
+			_ = r.Start(svcs[i], nil)
 		}
 		b.StopTimer()
-		tt.MustOK(r.HaltAll(1 * time.Second))
+		tt.MustOK(r.HaltAll(1*time.Second, 0))
 	}
 }
 

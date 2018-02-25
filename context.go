@@ -93,8 +93,8 @@ func (f *runContext) WhenError(errFunc func(svc Service, err error)) RunContext 
 // Standalone returns a RunContext you can pass to Service.Run() if you
 // want to run the service outside a Runner.
 //
-// If you want to capture ready signals, see WhenReady(). To capture
-// non-halting error signals, see WhenError().
+// If you want to capture ready signals, see RunContext.WhenReady(). To capture
+// non-halting error signals, see RunContext.WhenError().
 //
 func Standalone() RunContext {
 	ctx := &runContext{

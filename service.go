@@ -1,11 +1,5 @@
 package service
 
-import "time"
-
-// DefaultHaltTimeout should be inferred wherever possible when <= 0 is used as
-// the halt timeout.
-var DefaultHaltTimeout = 20 * time.Second
-
 type Service interface {
 	// Run the service, blocking the caller until the service is complete.
 	// ready MUST not be nil. ctx.Ready() MUST be called.
@@ -43,15 +37,4 @@ func (f *serviceFunc) Run(ctx Context) error {
 
 func (f *serviceFunc) ServiceName() Name {
 	return f.name
-}
-
-func Timeout(timeout time.Duration) <-chan time.Time {
-	var after <-chan time.Time
-	if timeout <= 0 {
-		timeout = DefaultHaltTimeout
-	}
-	if timeout > 0 {
-		after = time.After(timeout)
-	}
-	return after
 }

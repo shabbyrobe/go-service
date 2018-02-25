@@ -9,6 +9,9 @@ import (
 
 // Ready allows these utilities to signal when they are ready to callers.
 // service.Context should implement Ready.
+//
+// Deprecated: this will be reconsidered now that service.ReadySignal
+// has been added.
 type Ready interface {
 	Ready() error
 }

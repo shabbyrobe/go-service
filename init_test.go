@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,8 @@ const (
 
 var (
 	fuzzEnabled   bool
-	fuzzTimeSec   float64
+	fuzzTimeStr   string
+	fuzzTimeDur   time.Duration
 	fuzzTickNsec  int64
 	fuzzSeed      int64
 	fuzzDebugHost string
@@ -36,13 +38,19 @@ var (
 
 func TestMain(m *testing.M) {
 	flag.BoolVar(&fuzzEnabled, "service.fuzz", false, "Fuzz? Nope by default.")
-	flag.Float64Var(&fuzzTimeSec, "service.fuzztime", float64(1*time.Second)/float64(time.Second), "Run the fuzzer for this many seconds")
+	flag.StringVar(&fuzzTimeStr, "service.fuzztime", "1s", "Run the fuzzer for this duration")
 	flag.Int64Var(&fuzzTickNsec, "service.fuzzticknsec", 0, "How frequently to tick in the fuzzer's loop.")
 	flag.Int64Var(&fuzzSeed, "service.fuzzseed", -1, "Randomise the fuzz tester with this non-negative seed prior to every fuzz test")
 	flag.StringVar(&fuzzDebugHost, "service.debughost", "", "Start a debug server at this host to allow expvars/pprof")
 	flag.Int64Var(&fuzzMetaRolls, "service.fuzzmetarolls", 20, "Re-roll the meta fuzz tester this many times")
 	flag.IntVar(&fuzzMetaMin, "service.fuzzmetamin", 5, "Minimum number of times to run the meta fuzzer regardless of duration")
 	flag.Parse()
+
+	var err error
+	fuzzTimeDur, err = time.ParseDuration(fuzzTimeStr)
+	if err != nil {
+		panic(err)
+	}
 
 	if fuzzDebugHost != "" {
 		mux := http.NewServeMux()
@@ -52,6 +60,19 @@ func TestMain(m *testing.M) {
 		mux.Handle("/debug/pprof/profile", http.HandlerFunc(netprof.Profile))
 		mux.Handle("/debug/pprof/symbol", http.HandlerFunc(netprof.Symbol))
 		mux.Handle("/debug/pprof/trace", http.HandlerFunc(netprof.Trace))
+		expvar.Publish("app", expvar.Func(func() interface{} {
+			out := map[string]interface{}{
+				"Goroutines": runtime.NumGoroutine(),
+			}
+			return out
+		}))
+		expvar.Publish("fuzz", expvar.Func(func() interface{} {
+			fz := getCurrentFuzzer()
+			if fz != nil {
+				return fz.Stats.Map()
+			}
+			return nil
+		}))
 
 		runtime.SetMutexProfileFraction(5)
 
@@ -76,10 +97,15 @@ func TestMain(m *testing.M) {
 	beforeCount := pprof.Lookup("goroutine").Count()
 	code := m.Run()
 
+	// This little hack gives things like "go OnServiceState" a chance to
+	// finish - it routinely shows up in the profile.
+	//
+	// Also, some calls to the listener that are called with "go" might
+	// not have had a chance to finish. This is brittle, true, but some
+	// of the tests are hopelessly complicated without it.
+	time.Sleep(20 * time.Millisecond)
+
 	if code == 0 {
-		// This little hack gives things like "go OnServiceState" a chance to
-		// finish - it routinely shows up in the profile
-		time.Sleep(20 * time.Millisecond)
 
 		after := pprof.Lookup("goroutine")
 		afterCount := after.Count()
@@ -453,12 +479,39 @@ type runnerWithFailingStart struct {
 	err error
 }
 
-func (t *runnerWithFailingStart) Start(service Service) (err error) {
+func (t *runnerWithFailingStart) Start(service Service, ready ReadySignal) (err error) {
 	if t.failAfter > 0 {
-		err = t.Runner.Start(service)
+		err = t.Runner.Start(service, ready)
 		t.failAfter--
 	} else {
 		err = t.err
 	}
 	return
+}
+
+func errorListSorted(err error) (out []error) {
+	if eg, ok := err.(errorGroup); ok {
+		out = eg.Errors()
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Error() < out[j].Error()
+		})
+		return
+	} else {
+		return []error{err}
+	}
+}
+
+func causeListSorted(err error) (out []error) {
+	if eg, ok := err.(errorGroup); ok {
+		out = eg.Errors()
+		for i := 0; i < len(out); i++ {
+			out[i] = cause(out[i])
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Error() < out[j].Error()
+		})
+		return
+	} else {
+		return []error{err}
+	}
 }

@@ -11,23 +11,42 @@ import (
 	"testing"
 	"time"
 
-	_ "expvar"
-
 	"github.com/shabbyrobe/golib/assert"
 )
 
 // TODO:
 // - should attempt to restart certain services
 // - runnerWithFailingStart chance
-// - should randomly call WhenReady on an existing service regardless of its state
+
+const (
+	DefaultRunnerLimit  int = 20000
+	DefaultServiceLimit int = 100000
+)
+
+// Used for expvar
+var currentFuzzer *RunnerFuzzer
+var currentFuzzerLock sync.Mutex
+
+func getCurrentFuzzer() *RunnerFuzzer {
+	currentFuzzerLock.Lock()
+	defer currentFuzzerLock.Unlock()
+	return currentFuzzer
+}
+
+func setCurrentFuzzer(fz *RunnerFuzzer) {
+	currentFuzzerLock.Lock()
+	currentFuzzer = fz
+	currentFuzzerLock.Unlock()
+}
 
 func TestRunnerFuzzHappy(t *testing.T) {
 	// Happy config: should yield no errors
 	stats := NewStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		RunnerCreateChance: 0.01,
-		RunnerHaltChance:   0,
+		SyncHalt:           true,
+		RunnerCreateChance: 0.001,
+		RunnerHaltChance:   0.0,
 
 		ServiceCreateChance:       0.2,
 		ServiceStartFailureChance: 0,
@@ -40,11 +59,11 @@ func TestRunnerFuzzHappy(t *testing.T) {
 
 		StartWaitChance:    0.2,
 		ServiceStartTime:   TimeRange{0, 0},
-		StartWaitTimeout:   TimeRange{1 * time.Second, 1 * time.Second},
-		ServiceRunTime:     TimeRange{5 * time.Second, 5 * time.Second},
-		ServiceHaltAfter:   TimeRange{1 * time.Second, 1 * time.Second},
+		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceHaltAfter:   TimeRange{200 * time.Millisecond, 1 * time.Second},
 		ServiceHaltDelay:   TimeRange{0, 0},
-		ServiceHaltTimeout: TimeRange{1 * time.Second, 1 * time.Second},
+		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
 		ServiceRegisterBeforeStartChance:  0.1,
 		ServiceRegisterAfterStartChance:   0.1,
@@ -57,6 +76,7 @@ func TestRunnerFuzzHappy(t *testing.T) {
 	})
 
 	tt := assert.WrapTB(t)
+	tt.MustEqual(0, stats.GetServicesCurrent())
 	for _, s := range []*ServiceStats{stats.ServiceStats, stats.GroupStats} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
@@ -67,11 +87,62 @@ func TestRunnerFuzzHappy(t *testing.T) {
 	}
 }
 
-func TestRunnerFuzzMessy(t *testing.T) {
+func TestRunnerFuzzReasonable(t *testing.T) {
+	// Happy error path: will yield plenty of errors, but should not yield
+	// any unrecoverable ones.
+	stats := NewStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		RunnerCreateChance: 0.005,
-		RunnerHaltChance:   0.001,
+		SyncHalt:           true,
+		RunnerCreateChance: 0.001,
+		RunnerHaltChance:   0.0,
+
+		ServiceCreateChance:       0.2,
+		ServiceStartFailureChance: 0.01,
+		ServiceRunFailureChance:   0.02,
+
+		GroupCreateChance:              0.2,
+		GroupSize:                      IntRange{2, 4},
+		GroupServiceStartFailureChance: 0.02,
+		GroupServiceRunFailureChance:   0.02,
+
+		StartWaitChance:    0.2,
+		ServiceStartTime:   TimeRange{0, 0},
+		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceRunTime:     TimeRange{700 * time.Millisecond, 2 * time.Second},
+		ServiceHaltAfter:   TimeRange{100 * time.Millisecond, 1 * time.Second},
+		ServiceHaltDelay:   TimeRange{0, 100 * time.Microsecond},
+		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
+
+		ServiceRegisterBeforeStartChance:  0.01,
+		ServiceRegisterAfterStartChance:   0.01,
+		ServiceUnregisterHaltChance:       0.01,
+		ServiceUnregisterUnexpectedChance: 0.01,
+
+		StateCheckChance: 0.2,
+
+		Stats: stats,
+	})
+
+	tt := assert.WrapTB(t)
+	tt.MustEqual(0, stats.GetServicesCurrent())
+	tt.MustEqual(stats.Starts(), stats.Ends())
+
+	tt.MustAssert(stats.GroupStats.ServiceStartWait.Succeeded() > stats.GroupStats.ServiceStartWait.Failed())
+	tt.MustAssert(stats.GroupStats.ServiceStart.Succeeded() > stats.GroupStats.ServiceStart.Failed())
+	tt.MustAssert(stats.GroupStats.ServiceHalt.Succeeded() > stats.GroupStats.ServiceHalt.Failed())
+
+	tt.MustAssert(stats.ServiceStats.ServiceStartWait.Succeeded() > stats.ServiceStats.ServiceStartWait.Failed())
+	tt.MustAssert(stats.ServiceStats.ServiceStart.Succeeded() > stats.ServiceStats.ServiceStart.Failed())
+	tt.MustAssert(stats.ServiceStats.ServiceHalt.Succeeded() > stats.ServiceStats.ServiceHalt.Failed())
+}
+
+func TestRunnerFuzzMessy(t *testing.T) {
+	stats := NewStats()
+	fz := &RunnerFuzzer{
+		Tick:               time.Duration(fuzzTickNsec),
+		RunnerCreateChance: 0.000,
+		RunnerHaltChance:   0.000,
 
 		ServiceCreateChance:       0.2,
 		ServiceStartFailureChance: 0.05,
@@ -93,17 +164,31 @@ func TestRunnerFuzzMessy(t *testing.T) {
 		ServiceUnregisterHaltChance:       0.3,
 		ServiceUnregisterUnexpectedChance: 0.02,
 
-		Stats: NewStats(),
-	})
+		Stats: stats,
+	}
+	testFuzz(t, fz)
+
+	tt := assert.WrapTB(t)
+
+	// Experimental check
+	// mustWithin(tt, 0.5, fz.ServiceStartFailureChance+fz.ServiceRunFailureChance,
+	//     fz.Stats.ServiceStats.ServiceEnds["start failure"]+
+	//         fz.Stats.ServiceStats.ServiceEnds["run failure"]+
+	//         fz.Stats.ServiceStats.ServiceEnds["service ended"],
+	//     fz.Stats.ServiceStats.ServiceStart.succeeded)
+
+	for _, s := range []*ServiceStats{stats.ServiceStats, stats.GroupStats} {
+		tt.MustEqual(0, s.ServiceStart.Failed())
+	}
 }
 
 func TestRunnerFuzzOutrage(t *testing.T) {
-	// Pathological configuration - should fail far more often than it succeeds,
-	// but should not leave any stray crap lying around.
+	// Pathological configuration - should fail far more often than it succeeds and
+	// seems to leave stray crap lying around.
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		RunnerCreateChance: 0.02,
-		RunnerHaltChance:   0.01,
+		RunnerCreateChance: 0.005,
+		RunnerHaltChance:   0.005,
 
 		ServiceCreateChance:       0.3,
 		ServiceStartFailureChance: 0.1,
@@ -120,12 +205,59 @@ func TestRunnerFuzzOutrage(t *testing.T) {
 		ServiceRunTime:                    TimeRange{0, 50 * time.Millisecond},
 		ServiceHaltAfter:                  TimeRange{0, 50 * time.Millisecond},
 		ServiceHaltDelay:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{0, 50 * time.Millisecond},
+		ServiceHaltTimeout:                TimeRange{1 * time.Nanosecond, 50 * time.Millisecond},
 		StateCheckChance:                  0.2,
 		ServiceUnregisterHaltChance:       0.3,
 		ServiceUnregisterUnexpectedChance: 0.3,
 
 		Stats: NewStats(),
+	})
+}
+
+func TestRunnerFuzzImpatient(t *testing.T) {
+	// All wait times are zero. This should hopefully flush out some timing
+	// bugs in the API like this one:
+	// - Start() a service without Waiting or retaining
+	// - Service ends with an error before calling Ready(), causing
+	//   the runner to remove references to it.
+	// - <-WhenReady() (old api) was called, but the error had been removed
+	//   so instead of returning the Start() error, it was swallowed.
+	//
+	// This error was happening because the calling code just didn't make
+	// it to WhenReady() in time. Hopefully this helps minimise the chances
+	// of bugs like that slipping the net again.
+
+	stats := NewStats()
+	testFuzz(t, &RunnerFuzzer{
+		Tick:               time.Duration(fuzzTickNsec),
+		RunnerCreateChance: 0,
+		RunnerHaltChance:   0,
+
+		ServiceCreateChance:       0.2,
+		ServiceStartFailureChance: 0,
+		ServiceRunFailureChance:   0,
+
+		GroupCreateChance:              0.2,
+		GroupSize:                      IntRange{2, 4},
+		GroupServiceStartFailureChance: 0,
+		GroupServiceRunFailureChance:   0,
+
+		StartWaitChance:    0.2,
+		ServiceStartTime:   TimeRange{0, 0},
+		StartWaitTimeout:   TimeRange{1 * time.Second, 1 * time.Second},
+		ServiceRunTime:     TimeRange{0, 0},
+		ServiceHaltAfter:   TimeRange{0, 0},
+		ServiceHaltDelay:   TimeRange{0, 0},
+		ServiceHaltTimeout: TimeRange{1 * time.Second, 1 * time.Second},
+
+		ServiceRegisterBeforeStartChance:  0.1,
+		ServiceRegisterAfterStartChance:   0.1,
+		ServiceUnregisterHaltChance:       0.3,
+		ServiceUnregisterUnexpectedChance: 0,
+
+		StateCheckChance: 0.2,
+
+		Stats: stats,
 	})
 }
 
@@ -143,7 +275,7 @@ func TestRunnerMetaFuzzInsanity(t *testing.T) {
 	rand.Seed(fuzzSeed)
 
 	start := time.Now()
-	dur := time.Duration(fuzzTimeSec * float64(time.Second))
+	dur := time.Duration(fuzzTimeDur)
 
 	builder := &RunnerFuzzerBuilder{
 		RunnerCreateChance: FloatRange{0.001, 0.02},
@@ -206,25 +338,47 @@ func testFuzz(t *testing.T, fz *RunnerFuzzer) {
 		t.Skip("skipping fuzz test")
 	}
 
+	if fz.RunnerLimit == 0 {
+		fz.RunnerLimit = DefaultRunnerLimit
+	}
+	if fz.ServiceLimit == 0 {
+		fz.ServiceLimit = DefaultServiceLimit
+	}
+
 	rand.Seed(fuzzSeed)
 	fz.Stats.Seed = fuzzSeed
 
-	dur := time.Duration(fuzzTimeSec * float64(time.Second))
+	setCurrentFuzzer(fz)
+
+	dur := time.Duration(fuzzTimeDur)
 	fz.Duration = dur
 	fz.Run(assert.WrapTB(t))
+
 	if testing.Verbose() {
 		e := json.NewEncoder(os.Stdout)
 		e.SetIndent("", "  ")
 		e.Encode(fz.Stats.Clone())
+
+		fmt.Println("ServicesCurrent", fz.Stats.ServicesCurrent)
+		fmt.Println("Starts", fz.Stats.Starts())
+		fmt.Println("Ends", fz.Stats.Ends())
 	}
 }
 
 type RunnerFuzzer struct {
-	Duration time.Duration
-	Tick     time.Duration
+	Duration     time.Duration
+	Tick         time.Duration
+	RunnerLimit  int
+	ServiceLimit int
+
+	SyncHalt bool
 
 	RunnerCreateChance float64
-	RunnerHaltChance   float64
+
+	// This is a wonderful mess-maker. It will attempt, in a goroutine,
+	// to halt every service it finds in a runner. It does NOT a happy
+	// path make.
+	RunnerHaltChance float64
 
 	ServiceCreateChance       float64
 	ServiceStartFailureChance float64
@@ -296,7 +450,8 @@ func (r *RunnerFuzzer) haltRunner() {
 		defer r.wg.Done()
 
 		// this can take a while so make sure it's done in a goroutine
-		runner.HaltAll(r.ServiceHaltTimeout.Rand())
+		n, _ := runner.HaltAll(r.ServiceHaltTimeout.Rand(), 0)
+		r.Stats.AddServicesCurrent(-n)
 		r.Stats.AddRunnersHalted(1)
 	}()
 }
@@ -382,7 +537,7 @@ func (r *RunnerFuzzer) createGroup() {
 		services = append(services, service)
 	}
 
-	group := NewGroup(n, services)
+	group := NewGroup(n, services...)
 	r.runService(group, r.Stats.GroupStats)
 }
 
@@ -400,6 +555,11 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 	}
 	willRegister := willRegisterBefore || willRegisterAfter
 
+	var syncHalt chan struct{}
+	if r.SyncHalt {
+		syncHalt = make(chan struct{})
+	}
+
 	// After a while, we will halt the service, but only if it hasn't ended
 	// first.
 	// This needs to happen before we start the service so that it is possible
@@ -407,6 +567,11 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 	r.wg.Add(1)
 	time.AfterFunc(r.ServiceHaltAfter.Rand(), func() {
 		defer r.wg.Done()
+
+		if syncHalt != nil {
+			<-syncHalt
+		}
+
 		err := runner.Halt(r.ServiceHaltTimeout.Rand(), service)
 		stats.ServiceHalt.Add(err)
 
@@ -431,12 +596,23 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 			stats.ServiceRegisterBeforeStart.Add(nil)
 		}
 
+		var err error
 		if should(r.StartWaitChance) {
-			err := runner.StartWait(r.StartWaitTimeout.Rand(), service)
+			err = runner.StartWait(r.StartWaitTimeout.Rand(), service)
 			stats.ServiceStartWait.Add(err)
 		} else {
-			err := runner.Start(service)
+			err = runner.Start(service, nil)
 			stats.ServiceStart.Add(err)
+		}
+
+		if syncHalt != nil {
+			close(syncHalt)
+		}
+
+		// If StartWait returns a timeout, the listener gets an ended
+		// and the current services decrements there.
+		if err == nil || IsErrWaitTimeout(cause(err)) {
+			r.Stats.AddServicesCurrent(1)
 		}
 
 		if willRegisterAfter {
@@ -446,29 +622,28 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 	}()
 }
 
-func (r *RunnerFuzzer) scheduleHalt(runner Runner, service Service, stats *ServiceStats) {
-}
-
 func (r *RunnerFuzzer) doTick() {
 	// maybe halt a runnner, but never if it's the last.
-	if r.Stats.GetRunnersCurrent() > 1 && should(r.RunnerHaltChance) {
+	rcur := r.Stats.GetRunnersCurrent()
+	if rcur > 1 && should(r.RunnerHaltChance) {
 		r.haltRunner()
 	}
 
 	// maybe start a runner
-	if r.Stats.GetTick() == 0 || should(r.RunnerCreateChance) {
+	if (r.Stats.GetTick() == 0 || should(r.RunnerCreateChance)) && rcur < r.RunnerLimit {
 		r.startRunner()
 	}
 
 	// maybe start a service into one of the existing runners, chosen
 	// at random
-	if should(r.ServiceCreateChance) {
+	scur := r.Stats.GetServicesCurrent()
+	if should(r.ServiceCreateChance) && scur < r.ServiceLimit {
 		r.createService()
 	}
 
 	// maybe start a group of services into one of the existing runners, chosen
 	// at random
-	if should(r.GroupCreateChance) {
+	if should(r.GroupCreateChance) && scur < r.ServiceLimit {
 		r.createGroup()
 	}
 
@@ -491,7 +666,7 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 
 	r.Stats.Start()
 
-	if r.Tick < 50*time.Microsecond {
+	if r.Tick == 0 {
 		r.hotLoop()
 	} else {
 		r.tickLoop()
@@ -500,8 +675,11 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	r.wg.Wait()
 
 	// OK now we gotta clean up after ourselves.
+	timeout := 2*time.Second + (r.ServiceHaltDelay.Max * 10)
 	for _, rn := range r.runners {
-		tt.MustOK(rn.HaltAll(r.ServiceHaltDelay.Max * 10))
+		n, err := rn.HaltAll(timeout, 0)
+		r.Stats.AddServicesCurrent(-n)
+		tt.MustOK(err)
 	}
 
 	// Need to wait for any stray halt delays - the above HaltAll
@@ -509,6 +687,15 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	// things that are already Halting and not blocking to wait for them.
 	// That may not be ideal, perhaps it should be fixed.
 	time.Sleep(r.ServiceHaltDelay.Max)
+}
+
+func (r *RunnerFuzzer) Service(service Service) *ServiceStats {
+	switch service.(type) {
+	case *Group:
+		return r.Stats.GroupStats
+	default:
+		return r.Stats.ServiceStats
+	}
 }
 
 func (r *RunnerFuzzer) OnServiceError(service Service, err Error) {
@@ -521,16 +708,15 @@ func (r *RunnerFuzzer) OnServiceError(service Service, err Error) {
 }
 
 func (r *RunnerFuzzer) OnServiceEnd(service Service, err Error) {
-	if err != nil {
-		var s *ServiceStats
-		switch service.(type) {
-		case *Group:
-			s = r.Stats.GroupStats
-		default:
-			s = r.Stats.ServiceStats
-		}
-		s.AddServiceEnd(err)
+	var s *ServiceStats
+	switch service.(type) {
+	case *Group:
+		s = r.Stats.GroupStats
+	default:
+		s = r.Stats.ServiceStats
 	}
+	s.AddServiceEnd(err)
+	r.Stats.AddServicesCurrent(-1)
 }
 
 func (r *RunnerFuzzer) OnServiceState(service Service, state State) {}
@@ -540,25 +726,6 @@ func (r *RunnerFuzzer) hotLoop() {
 	for time.Since(start) < r.Duration {
 		r.doTick()
 	}
-}
-
-func (r *RunnerFuzzer) tickLoop() {
-	done := make(chan struct{})
-	tick := time.NewTicker(r.Tick)
-	end := time.After(r.Duration)
-
-	go func() {
-		for {
-			select {
-			case <-tick.C:
-				r.doTick()
-			case <-end:
-				close(done)
-				return
-			}
-		}
-	}()
-	<-done
 }
 
 func randomService(rr *runner) Service {
@@ -643,12 +810,13 @@ func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 }
 
 type Stats struct {
-	Duration       time.Duration
-	Seed           int64
-	Tick           int32
-	RunnersStarted int32
-	RunnersCurrent int32
-	RunnersHalted  int32
+	Duration        time.Duration
+	Seed            int64
+	Tick            int32
+	RunnersStarted  int32
+	RunnersCurrent  int32
+	RunnersHalted   int32
+	ServicesCurrent int32
 
 	ServiceStats *ServiceStats
 	GroupStats   *ServiceStats
@@ -679,11 +847,25 @@ func (s *Stats) StatsForService(svc Service) *ServiceStats {
 	}
 }
 
+func (s *Stats) Starts() int {
+	return s.ServiceStats.ServiceStart.Succeeded() +
+		s.ServiceStats.ServiceStartWait.Succeeded() +
+		s.GroupStats.ServiceStart.Succeeded() +
+		s.GroupStats.ServiceStartWait.Succeeded()
+}
+
+func (s *Stats) Ends() int {
+	return int(s.ServiceStats.ServiceEnded) + int(s.GroupStats.ServiceEnded)
+}
+
 func (s *Stats) Start() {
 	s.start = time.Now()
 	atomic.StoreInt32(&s.RunnersCurrent, 0)
 	atomic.StoreInt32(&s.Tick, 0)
 }
+
+func (s *Stats) GetServicesCurrent() int  { return int(atomic.LoadInt32(&s.ServicesCurrent)) }
+func (s *Stats) AddServicesCurrent(n int) { atomic.AddInt32(&s.ServicesCurrent, int32(n)) }
 
 func (s *Stats) GetTick() int { return int(atomic.LoadInt32(&s.Tick)) }
 func (s *Stats) AddTick()     { atomic.AddInt32(&s.Tick, 1) }
@@ -709,6 +891,19 @@ func (s *Stats) AddStateCheckResult(state State) {
 	s.stateCheckResultsLock.Unlock()
 }
 
+func (s *Stats) Map() map[string]interface{} {
+	return map[string]interface{}{
+		"Seed":            s.Seed,
+		"Tick":            s.GetTick(),
+		"RunnersCurrent":  s.GetRunnersCurrent(),
+		"RunnersStarted":  s.GetRunnersStarted(),
+		"RunnersHalted":   s.GetRunnersHalted(),
+		"ServicesCurrent": s.GetServicesCurrent(),
+		"ServiceStats":    s.ServiceStats.Map(),
+		"GroupStats":      s.GroupStats.Map(),
+	}
+}
+
 func (s *Stats) Clone() *Stats {
 	n := NewStats()
 	n.Duration = time.Since(s.start)
@@ -717,6 +912,7 @@ func (s *Stats) Clone() *Stats {
 	n.RunnersCurrent = int32(s.GetRunnersCurrent())
 	n.RunnersStarted = int32(s.GetRunnersStarted())
 	n.RunnersHalted = int32(s.GetRunnersHalted())
+	n.ServicesCurrent = int32(s.GetServicesCurrent())
 
 	n.ServiceStats = s.ServiceStats.Clone()
 	n.GroupStats = s.GroupStats.Clone()
@@ -768,12 +964,32 @@ func NewServiceStats() *ServiceStats {
 	}
 }
 
+func (s *ServiceStats) Map() map[string]interface{} {
+	return map[string]interface{}{
+		"ServiceEnded":                          s.GetServiceEnded(),
+		"ServiceHalt.Succeeded":                 s.ServiceHalt.Succeeded(),
+		"ServiceHalt.Failed":                    s.ServiceHalt.Failed(),
+		"ServiceStart.Succeeded":                s.ServiceStart.Succeeded(),
+		"ServiceStart.Failed":                   s.ServiceStart.Failed(),
+		"ServiceStartWait.Succeeded":            s.ServiceStartWait.Succeeded(),
+		"ServiceStartWait.Failed":               s.ServiceStartWait.Failed(),
+		"ServiceUnregisterHalt.Succeeded":       s.ServiceUnregisterHalt.Succeeded(),
+		"ServiceUnregisterHalt.Failed":          s.ServiceUnregisterHalt.Failed(),
+		"ServiceUnregisterUnexpected.Succeeded": s.ServiceUnregisterUnexpected.Succeeded(),
+		"ServiceUnregisterUnexpected.Failed":    s.ServiceUnregisterUnexpected.Failed(),
+		"ServiceRegisterBeforeStart.Succeeded":  s.ServiceRegisterBeforeStart.Succeeded(),
+		"ServiceRegisterBeforeStart.Failed":     s.ServiceRegisterBeforeStart.Failed(),
+		"ServiceRegisterAfterStart.Succeeded":   s.ServiceRegisterAfterStart.Succeeded(),
+		"ServiceRegisterAfterStart.Failed":      s.ServiceRegisterAfterStart.Failed(),
+	}
+}
+
 func (s *ServiceStats) GetServiceEnded() int { return int(atomic.LoadInt32(&s.ServiceEnded)) }
 func (s *ServiceStats) AddServiceEnded()     { atomic.AddInt32(&s.ServiceEnded, 1) }
 
 func (s *ServiceStats) AddServiceEnd(err error) {
-	s.serviceEndsLock.Lock()
 	s.AddServiceEnded()
+	s.serviceEndsLock.Lock()
 	for _, msg := range fuzzErrs(err) {
 		s.ServiceEnds[msg]++
 	}
@@ -816,6 +1032,9 @@ func (s *ServiceStats) Clone() *ServiceStats {
 }
 
 func listErrs(err error) (out []error) {
+	if err == nil {
+		return nil
+	}
 	c := cause(err)
 	if c != nil && c != err {
 		err = c
@@ -1033,5 +1252,48 @@ func (e *ErrorCounter) Add(err error) {
 			e.errors[msg]++
 		}
 		e.lock.Unlock()
+	}
+}
+
+const debugWithin = true
+
+func mustWithin(tt assert.T, tolerance float64, ratio float64, a interface{}, b interface{}) {
+	tt.Helper()
+	var afl, bfl = coerceFloat(a), coerceFloat(b)
+	var min, max = ratio - (ratio * tolerance), ratio + (ratio * tolerance)
+	if debugWithin && testing.Verbose() {
+		fmt.Printf("a / b = %f, expected %f < n < %f\n", afl/bfl, min, max)
+	}
+	tt.MustAssert((afl/bfl) >= min && (afl/bfl) <= max, "a / b = %f, expected %f < n < %f", afl/bfl, min, max)
+}
+
+func coerceFloat(n interface{}) float64 {
+	switch a := n.(type) {
+	case int:
+		return float64(a)
+	case int8:
+		return float64(a)
+	case int16:
+		return float64(a)
+	case int32:
+		return float64(a)
+	case int64:
+		return float64(a)
+	case uint:
+		return float64(a)
+	case uint8:
+		return float64(a)
+	case uint16:
+		return float64(a)
+	case uint32:
+		return float64(a)
+	case uint64:
+		return float64(a)
+	case float64:
+		return float64(a)
+	case float32:
+		return float64(a)
+	default:
+		panic("cannot coerce to float")
 	}
 }

@@ -16,8 +16,8 @@ type (
 // ended prematurely but no obvious error that could be returned.
 var ErrServiceEnded = errors.New("service ended")
 
-func (errWaitTimeout) Error() string    { return "signal wait timeout" }
-func (errHaltTimeout) Error() string    { return "signal halt timeout" }
+func (errWaitTimeout) Error() string    { return "service: wait timeout" }
+func (errHaltTimeout) Error() string    { return "service: halt timeout" }
 func (errServiceUnknown) Error() string { return "service unknown" }
 
 func IsErrWaitTimeout(err error) bool    { _, ok := cause(err).(errWaitTimeout); return ok }
@@ -35,15 +35,39 @@ type Error interface {
 	Name() Name
 }
 
+func Errors(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if errs, ok := err.(errorGroup); ok {
+		return errs.Errors()
+	}
+	return []error{err}
+}
+
 func WrapError(err error, svc Service) Error {
 	if err == nil {
 		return nil
 	}
-	return &serviceError{cause: err, name: svc.ServiceName()}
+	sname := svc.ServiceName()
+	if serr, ok := err.(*serviceError); ok {
+		if serr.Name() == sname {
+			return serr
+		}
+	}
+	return &serviceError{cause: err, name: sname}
 }
 
 type errorGroup interface {
 	Errors() []error
+}
+
+func errorList(err error) []error {
+	if eg, ok := err.(errorGroup); ok {
+		return eg.Errors()
+	} else {
+		return []error{err}
+	}
 }
 
 type serviceErrors struct {

@@ -84,7 +84,7 @@ func StartWait(timeout time.Duration, s service.Service) error {
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartListen(l Listener, s service.Service) error {
+func StartListen(l Listener, s service.Service, rdy service.ReadySignal) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
@@ -93,11 +93,11 @@ func StartListen(l Listener, s service.Service) error {
 	if l != nil {
 		listener.Add(s, l)
 	}
-	return runner.Start(s)
+	return runner.Start(s, rdy)
 }
 
-func Start(s service.Service) error {
-	return StartListen(nil, s)
+func Start(s service.Service, rdy service.ReadySignal) error {
+	return StartListen(nil, s, rdy)
 }
 
 // Halt halts a service in the global runner.
@@ -113,7 +113,7 @@ func Halt(timeout time.Duration, s service.Service) error {
 // HaltAll halts all services in the global runner.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func HaltAll(timeout time.Duration) error {
+func HaltAll(timeout time.Duration) (n int, err error) {
 	lock.RLock()
 	defer lock.RUnlock()
 
@@ -145,22 +145,6 @@ func Unregister(s service.Service) error {
 
 	listener.Remove(s)
 	return runner.Unregister(s)
-}
-
-// WhenReady waits until a service in the global runner has started.
-func WhenReady(timeout time.Duration, s service.Service) error {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return runner.WhenReady(timeout, s)
-}
-
-// WhenAllReady waits until all services in the global runner have started.
-func WhenAllReady(timeout time.Duration, ss ...service.Service) error {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return service.WhenAllReady(runner, timeout, ss...)
 }
 
 func EnsureHalt(timeout time.Duration, s service.Service) error {
@@ -219,14 +203,14 @@ func (s Starter) StartWait(timeout time.Duration) error {
 	return StartWait(timeout, svc)
 }
 
-func (s Starter) StartListen(l Listener) error {
+func (s Starter) StartListen(l Listener, rdy service.ReadySignal) error {
 	svc := s.Service
 	s.Service = nil
-	return StartListen(l, svc)
+	return StartListen(l, svc, rdy)
 }
 
-func (s Starter) Start() error {
+func (s Starter) Start(rdy service.ReadySignal) error {
 	svc := s.Service
 	s.Service = nil
-	return Start(svc)
+	return Start(svc, rdy)
 }

@@ -24,10 +24,11 @@ func TestStart(t *testing.T) {
 	// See notes in go-service/runner_test.go about startDelay
 	s1 := &dummyService{runTime: 100 * tscale, startDelay: 2 * tscale}
 
-	tt.MustOK(StartListen(nil, s1))
+	rdy := service.NewReadySignal()
+	tt.MustOK(StartListen(nil, s1, rdy))
 	tt.MustAssert(State(s1) == service.Starting)
 
-	tt.MustOK(WhenReady(dto, s1))
+	tt.MustOK(service.WhenReady(dto, rdy))
 	tt.MustAssert(State(s1) == service.Started)
 
 	tt.MustOK(Halt(dto, s1))
@@ -43,7 +44,6 @@ func TestStartWait(t *testing.T) {
 
 	tt.MustOK(StartWaitListen(10*tscale, nil, s1))
 	tt.MustAssert(State(s1) == service.Started)
-	tt.MustOK(WhenReady(dto, s1))
 
 	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
