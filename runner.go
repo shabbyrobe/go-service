@@ -212,7 +212,7 @@ func (r *runner) Start(service Service, ready ReadySignal) (err error) {
 	}
 
 	rs := r.runnerState(service)
-	ctx := newContext(service, r.Ready, r.OnError, rs.done)
+	ctx := newSvcContext(service, r.Ready, r.OnError, rs.done)
 
 	go func() {
 		err := service.Run(ctx)

@@ -1,6 +1,9 @@
 package service
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const MinHaltableSleep = 50 * time.Millisecond
 
@@ -8,11 +11,7 @@ const MinHaltableSleep = 50 * time.Millisecond
 // that the service is ready, to receive the signal to halt or to relay
 // non-fatal errors to the Runner's listener.
 type Context interface {
-	// Done returns a channel which will be closed when the service should
-	// stop. All services should either include this channel in their select
-	// loop, or regularly poll IsDone().
-	// It is safe to add this channel to more than one select loop.
-	Done() <-chan struct{}
+	context.Context
 
 	// IsDone returns true if the service has been instructed to halt by
 	// its runner. All services should either regularly poll this, or
@@ -27,6 +26,8 @@ type Context interface {
 	// service to halt prematurely up to the runner's listener.
 	OnError(err error)
 }
+
+var _ context.Context = &svcContext{}
 
 // Sleep allows a service to perform an interruptible sleep - it will
 // return early if the service is halted.
@@ -65,7 +66,7 @@ var emptyErrFunc = func(service Service, err error) {}
 var emptyReadyFunc = func(service Service) error { return nil }
 
 type runContext struct {
-	context
+	svcContext
 }
 
 func (f *runContext) Halt() {
@@ -98,7 +99,7 @@ func (f *runContext) WhenError(errFunc func(svc Service, err error)) RunContext 
 //
 func Standalone() RunContext {
 	ctx := &runContext{
-		context: context{
+		svcContext: svcContext{
 			done:      make(chan struct{}),
 			readyFunc: emptyReadyFunc,
 			errFunc:   emptyErrFunc,
@@ -107,15 +108,15 @@ func Standalone() RunContext {
 	return ctx
 }
 
-type context struct {
+type svcContext struct {
 	service   Service
 	readyFunc readyFunc
 	errFunc   errFunc
 	done      chan struct{}
 }
 
-func newContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan struct{}) Context {
-	return &context{
+func newSvcContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan struct{}) Context {
+	return &svcContext{
 		service:   service,
 		done:      done,
 		readyFunc: readyFunc,
@@ -123,13 +124,19 @@ func newContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan
 	}
 }
 
-func (c *context) Ready() error { return c.readyFunc(c.service) }
+func (c *svcContext) Deadline() (deadline time.Time, ok bool) { return }
 
-func (c *context) OnError(err error) { c.errFunc(c.service, err) }
+func (c *svcContext) Err() error { return nil }
 
-func (c *context) Done() <-chan struct{} { return c.done }
+func (c *svcContext) Value(key interface{}) interface{} { return nil }
 
-func (c *context) IsDone() bool {
+func (c *svcContext) Ready() error { return c.readyFunc(c.service) }
+
+func (c *svcContext) OnError(err error) { c.errFunc(c.service, err) }
+
+func (c *svcContext) Done() <-chan struct{} { return c.done }
+
+func (c *svcContext) IsDone() bool {
 	select {
 	case <-c.done:
 		return true

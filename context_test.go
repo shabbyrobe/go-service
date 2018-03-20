@@ -24,7 +24,7 @@ func TestContextStandalone(t *testing.T) {
 var TestingDone bool
 
 func BenchmarkContextIsDoneNil(b *testing.B) {
-	ctx := newContext(nil, nil, nil, nil)
+	ctx := newSvcContext(nil, nil, nil, nil)
 	for i := 0; i < b.N; i++ {
 		TestingDone = ctx.IsDone()
 	}
@@ -33,7 +33,7 @@ func BenchmarkContextIsDoneNil(b *testing.B) {
 func BenchmarkContextIsDoneClosed(b *testing.B) {
 	ch := make(chan struct{})
 	close(ch)
-	ctx := newContext(nil, nil, nil, ch)
+	ctx := newSvcContext(nil, nil, nil, ch)
 	for i := 0; i < b.N; i++ {
 		TestingDone = ctx.IsDone()
 	}
@@ -41,7 +41,7 @@ func BenchmarkContextIsDoneClosed(b *testing.B) {
 
 func BenchmarkContextIsDoneOpen(b *testing.B) {
 	ch := make(chan struct{})
-	ctx := newContext(nil, nil, nil, ch)
+	ctx := newSvcContext(nil, nil, nil, ch)
 	for i := 0; i < b.N; i++ {
 		TestingDone = ctx.IsDone()
 	}
