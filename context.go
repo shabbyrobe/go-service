@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,6 +52,8 @@ func Sleep(ctx Context, d time.Duration) (halted bool) {
 
 type RunContext interface {
 	Context
+
+	// Halt stops the context. It must be safe to call Halt() more than once.
 	Halt()
 
 	WhenReady(func(svc Service) error) RunContext
@@ -67,10 +70,13 @@ var emptyReadyFunc = func(service Service) error { return nil }
 
 type runContext struct {
 	svcContext
+	halted int32
 }
 
 func (f *runContext) Halt() {
-	close(f.done)
+	if atomic.CompareAndSwapInt32(&f.halted, 0, 1) {
+		close(f.done)
+	}
 }
 
 func (f *runContext) WhenReady(readyFunc func(svc Service) error) RunContext {

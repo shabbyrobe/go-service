@@ -20,6 +20,17 @@ func TestContextStandalone(t *testing.T) {
 	<-end
 }
 
+func TestRunContextMultipleHalts(t *testing.T) {
+	rc := &runContext{
+		svcContext: svcContext{
+			done: make(chan struct{}, 1),
+		},
+	}
+	rc.Halt()
+	rc.Halt()
+	rc.Halt()
+}
+
 // Done needs to be exported so the compiler doesn't think it should be eliminated.
 var TestingDone bool
 
