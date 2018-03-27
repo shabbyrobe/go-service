@@ -180,6 +180,20 @@ func MustShutdown(timeout time.Duration) {
 	MustEnsureHaltAll(timeout, Runner().Services(service.FindRunning)...)
 }
 
+func DeferEnsureHalt(into *error, timeout time.Duration, service service.Service) {
+	cerr := EnsureHalt(timeout, service)
+	if *into == nil && cerr != nil {
+		*into = cerr
+	}
+}
+
+func DeferHalt(into *error, timeout time.Duration, service service.Service) {
+	cerr := Halt(timeout, service)
+	if *into == nil && cerr != nil {
+		*into = cerr
+	}
+}
+
 func getListener() *listenerDispatcher {
 	lock.RLock()
 	l := listener

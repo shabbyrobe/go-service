@@ -54,6 +54,7 @@ type RunContext interface {
 	Context
 
 	// Halt stops the context. It must be safe to call Halt() more than once.
+	// Halt() does not block until the service is halted.
 	Halt()
 
 	WhenReady(func(svc Service) error) RunContext
