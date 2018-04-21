@@ -71,7 +71,9 @@ type Runner interface {
 	// Unregister unregisters a service that has been registered in this runner.
 	// If the service is running, it will not be unregistered immediately, but will
 	// be Unregistered when it stops, either by halting or by erroring.
-	Unregister(s Service) error
+	//
+	// If the unregister was deferred, this will be returned in the first return arg.
+	Unregister(s Service) (deferred bool, err error)
 }
 
 // Listener allows you to respond to events raised by the Runner in the
@@ -488,22 +490,24 @@ func (r *runner) Register(service Service) Runner {
 	return r
 }
 
-func (r *runner) Unregister(service Service) error {
+func (r *runner) Unregister(service Service) (deferred bool, rerr error) {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
 	rs := r.states[service]
 	if rs == nil {
-		return errServiceUnknown(0)
+		return false, errServiceUnknown(0)
 	}
 
 	state := rs.changer.State()
-	if state != Halted {
+	deferred = state != Halted
+
+	if deferred {
 		rs.retain = false
 	} else {
 		delete(r.states, service)
 	}
-	return nil
+	return deferred, nil
 }
 
 func newRunnerState() *runnerState {

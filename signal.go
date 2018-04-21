@@ -24,6 +24,10 @@ func init() {
 type ReadySignal interface {
 	Done(err error) (ok bool)
 	Cancel()
+
+	// Ready returns a channel that yields a nil when the service is ready,
+	// or an error when the service has failed to become ready. Use WhenReady
+	// to wait for this with a timeout.
 	Ready() <-chan error
 }
 

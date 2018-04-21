@@ -7,3 +7,8 @@ To reproduce, edit TestRunnerFuzzMessy like so:
     StartWaitTimeout:  TimeRange{1, 1},
     ServiceRunTime:    TimeRange{0, 500 * time.Millisecond},
 
+- service.WhenReady should take ctx so it can signal Done()
+- service.ErrServiceEnded should be private and have an assertion method
+- context.Context should be a first class citizen; this package seems to re-implement
+  half of it just because I couldn't see past the janky API. I get it now, and this
+  should use it.

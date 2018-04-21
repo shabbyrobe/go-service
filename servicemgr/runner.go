@@ -1,230 +1,162 @@
+// +build ignore
+
+// This is an attempt to clean up the listener/runner state complexity in servicemgr.
+// It's not complete yet.
+
 package servicemgr
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
 )
 
-var (
-	listener        *listenerDispatcher
+type manager struct {
+	runner service.Runner
+
+	listeners        map[service.Service]Listener
+	listenersNHError map[service.Service]NonHaltingErrorListener
+	listenersState   map[service.Service]StateListener
+	retained         map[service.Service]bool
+
 	defaultListener service.Listener
-	runner          service.Runner
-	lock            sync.RWMutex
-)
-
-func init() {
-	Reset()
+	lock            sync.Mutex
 }
 
-func Runner() service.Runner {
-	lock.RLock()
-	r := runner
-	lock.RUnlock()
-	return r
-}
-
-// Reset is used to replace the global runner with a fresh one. If you do not ensure
-// all services are halted before calling Reset(), you will leak reasources.
-func Reset() {
-	lock.Lock()
-	listener = newListenerDispatcher()
-	listener.SetDefaultListener(defaultListener)
-	runner = service.NewRunner(listener)
-	lock.Unlock()
-}
-
-func DefaultListener(l service.Listener) {
-	lock.Lock()
-	defer lock.Unlock()
-	defaultListener = l
-	listener.SetDefaultListener(l)
-}
-
-func State(s service.Service) service.State {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return runner.State(s)
-}
-
-// StartWait starts a service in the global runner.
-//
-// You may also provide an optional Listener which will allow the caller to
-// respond to errors and service ends. If the listener argument is nil and the
-// service itself implements Listener, it will be used.
-//
-// Listeners can be used multiple times when starting different services.
-//
-// See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartWaitListen(timeout time.Duration, l Listener, s service.Service) error {
-	lock.RLock()
-	defer lock.RUnlock()
-	if l == nil {
-		l, _ = s.(Listener)
+func newManager() *manager {
+	m := &manager{
+		listeners:        make(map[service.Service]Listener),
+		listenersNHError: make(map[service.Service]NonHaltingErrorListener),
+		listenersState:   make(map[service.Service]StateListener),
+		retained:         make(map[service.Service]bool),
 	}
-	if l != nil {
-		listener.Add(s, l)
-	}
-	return runner.StartWait(timeout, s)
+	m.runner = service.NewRunner(m)
+	return m
 }
 
-func StartWait(timeout time.Duration, s service.Service) error {
-	return StartWaitListen(timeout, nil, s)
+var _ service.Runner = &manager{}
+
+func (m *manager) SetDefaultListener(l service.Listener) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.defaultListener = l
 }
 
-// StartListen starts a service in the global runner.
-//
-// You may also provide an optional Listener (which may be the service itself),
-// which will allow the caller to respond to errors and service ends.
-//
-// Listeners can be used multiple times when starting different services.
-//
-// See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartListen(l Listener, s service.Service, rdy service.ReadySignal) error {
-	lock.RLock()
-	defer lock.RUnlock()
-	if l == nil {
-		l, _ = s.(Listener)
-	}
-	if l != nil {
-		listener.Add(s, l)
-	}
-	return runner.Start(s, rdy)
+func (m *manager) State(svc service.Service) service.State {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.State(svc)
 }
 
-func Start(s service.Service, rdy service.ReadySignal) error {
-	return StartListen(nil, s, rdy)
+func (m *manager) StartWait(timeout time.Duration, svc service.Service) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.StartWait(timeout, svc)
 }
 
-// Halt halts a service in the global runner.
-//
-// See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Halt(timeout time.Duration, s service.Service) error {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return runner.Halt(timeout, s)
+func (m *manager) Start(svc service.Service, rdy service.ReadySignal) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.Start(svc, rdy)
 }
 
-// HaltAll halts all services in the global runner.
-//
-// See github.com/shabbyrobe/go-service.Runner for more documentation.
-func HaltAll(timeout time.Duration, errlimit int) (n int, err error) {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return runner.HaltAll(timeout, errlimit)
-}
-
-// Services lists services in the global runner based on the criteria.
-//
-// See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Services(state service.StateQuery) []service.Service {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	return runner.Services(state)
-}
-
-// Register registers a service from the global runner.
-func Register(s service.Service) Starter {
-	lock.RLock()
-	defer lock.RUnlock()
-	_ = runner.Register(s)
-	return Starter{s}
-}
-
-// Unregister unregisters a service from the global runner.
-func Unregister(s service.Service) error {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	listener.Remove(s)
-	return runner.Unregister(s)
-}
-
-func EnsureHalt(timeout time.Duration, s service.Service) error {
-	return service.EnsureHalt(Runner(), timeout, s)
-}
-
-func MustEnsureHalt(timeout time.Duration, s service.Service) {
-	service.MustEnsureHalt(Runner(), timeout, s)
-}
-
-func EnsureHaltAll(timeout time.Duration, ss ...service.Service) error {
-	var msgs []string
-	r := Runner()
-	for _, s := range ss {
-		cerr := service.EnsureHalt(r, timeout, s)
-		if cerr != nil {
-			msgs = append(msgs, fmt.Sprintf("%s: %s", s.ServiceName(), cerr.Error()))
-		}
-	}
-	if len(msgs) > 0 {
-		return fmt.Errorf("haltall failed:\n%s", strings.Join(msgs, "\n"))
+func (m *manager) Halt(timeout time.Duration, svc service.Service) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	if err := m.runner.Halt(timeout, svc); err != nil {
+		return err
 	}
 	return nil
 }
 
-func MustEnsureHaltAll(timeout time.Duration, ss ...service.Service) {
-	if err := EnsureHaltAll(timeout, ss...); err != nil {
-		panic(err)
+// HaltAll is not supported
+func (m *manager) HaltAll(timeout time.Duration, errlimit int) (n int, err error) {
+	// It's too hard to manage the shared listener and still support HaltAll for now.
+	// global Shutdown is the way to do this.
+	return 0, fmt.Errorf("not supported")
+}
+
+func (m *manager) Services(state service.StateQuery) []service.Service {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.Services(state)
+}
+
+func (m *manager) Register(svc service.Service) service.Runner {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.Register(svc)
+}
+
+func (m *manager) Unregister(svc service.Service) (deferred bool, err error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.runner.Unregister(svc)
+}
+
+func (m *manager) Listen(service service.Service, l Listener) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.listeners[service] = l
+	if el, ok := l.(NonHaltingErrorListener); ok {
+		m.listenersNHError[service] = el
+	}
+	if sl, ok := l.(StateListener); ok {
+		m.listenersState[service] = sl
 	}
 }
 
-func MustShutdown(timeout time.Duration) {
-	MustEnsureHaltAll(timeout, Runner().Services(service.FindRunning)...)
+func (m *manager) Unlisten(service service.Service) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.unlisten(service)
 }
 
-func DeferEnsureHalt(into *error, timeout time.Duration, service service.Service) {
-	cerr := EnsureHalt(timeout, service)
-	if *into == nil && cerr != nil {
-		*into = cerr
+// unlisten expects m.lock is acquired
+func (m *manager) unlisten(service service.Service) {
+	delete(m.listeners, service)
+	delete(m.listenersNHError, service)
+	delete(m.listenersState, service)
+	delete(m.retained, service)
+}
+
+func (m *manager) OnServiceError(service service.Service, err service.Error) {
+	m.lock.Lock()
+	l, ok := m.listenersNHError[service]
+	if !ok {
+		l = m.defaultListener
+	}
+	m.lock.Unlock()
+	if l != nil {
+		l.OnServiceError(service, err)
 	}
 }
 
-func DeferHalt(into *error, timeout time.Duration, service service.Service) {
-	cerr := Halt(timeout, service)
-	if *into == nil && cerr != nil {
-		*into = cerr
+func (m *manager) OnServiceEnd(service service.Service, err service.Error) {
+	m.lock.Lock()
+	l, ok := m.listeners[service]
+	if !ok {
+		l = m.defaultListener
+	}
+	if !m.retained[service] {
+		m.unlisten(service)
+	}
+	m.lock.Unlock()
+	if l != nil {
+		l.OnServiceEnd(service, err)
 	}
 }
 
-func getListener() *listenerDispatcher {
-	lock.RLock()
-	l := listener
-	lock.RUnlock()
-	return l
-}
-
-type Starter struct {
-	service.Service
-}
-
-func (s Starter) StartWaitListen(timeout time.Duration, l Listener) error {
-	svc := s.Service
-	s.Service = nil
-	return StartWaitListen(timeout, l, svc)
-}
-
-func (s Starter) StartWait(timeout time.Duration) error {
-	svc := s.Service
-	s.Service = nil
-	return StartWait(timeout, svc)
-}
-
-func (s Starter) StartListen(l Listener, rdy service.ReadySignal) error {
-	svc := s.Service
-	s.Service = nil
-	return StartListen(l, svc, rdy)
-}
-
-func (s Starter) Start(rdy service.ReadySignal) error {
-	svc := s.Service
-	s.Service = nil
-	return Start(svc, rdy)
+func (m *manager) OnServiceState(service service.Service, state service.State) {
+	m.lock.Lock()
+	l, ok := m.listenersState[service]
+	if !ok {
+		l = m.defaultListener
+	}
+	m.lock.Unlock()
+	if l != nil {
+		l.OnServiceState(service, state)
+	}
 }
