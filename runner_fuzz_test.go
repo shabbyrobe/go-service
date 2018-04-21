@@ -485,7 +485,7 @@ func (r *RunnerFuzzer) unexpectedUnregister() {
 
 			svc := randomService(rr)
 			if svc != nil {
-				err := rr.Unregister(svc)
+				_, err := rr.Unregister(svc)
 				r.Stats.StatsForService(svc).ServiceUnregisterUnexpected.Add(err)
 			}
 		}()
@@ -580,7 +580,8 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 			go func() {
 				defer r.wg.Done()
 				if should(r.ServiceUnregisterHaltChance) {
-					stats.ServiceUnregisterHalt.Add(runner.Unregister(service))
+					_, err := runner.Unregister(service)
+					stats.ServiceUnregisterHalt.Add(err)
 				}
 			}()
 		}
@@ -630,7 +631,7 @@ func (r *RunnerFuzzer) doTick() {
 	}
 
 	// maybe start a runner
-	if (r.Stats.GetTick() == 0 || should(r.RunnerCreateChance)) && rcur < r.RunnerLimit {
+	if rcur == 0 || r.Stats.GetTick() == 0 || (should(r.RunnerCreateChance)) && rcur < r.RunnerLimit {
 		r.startRunner()
 	}
 
@@ -707,7 +708,7 @@ func (r *RunnerFuzzer) OnServiceError(service Service, err Error) {
 	}
 }
 
-func (r *RunnerFuzzer) OnServiceEnd(service Service, err Error) {
+func (r *RunnerFuzzer) OnServiceEnd(stage Stage, service Service, err Error) {
 	var s *ServiceStats
 	switch service.(type) {
 	case *Group:
@@ -793,10 +794,12 @@ func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 		GroupSize:                         f.GroupSize.Rand(),
 		RunnerCreateChance:                f.RunnerCreateChance.Rand(),
 		RunnerHaltChance:                  f.RunnerHaltChance.Rand(),
+		RunnerLimit:                       DefaultRunnerLimit,
 		ServiceCreateChance:               f.ServiceCreateChance.Rand(),
 		ServiceHaltAfter:                  f.ServiceHaltAfter.Rand(),
 		ServiceHaltDelay:                  f.ServiceHaltDelay.Rand(),
 		ServiceHaltTimeout:                f.ServiceHaltTimeout.Rand(),
+		ServiceLimit:                      DefaultServiceLimit,
 		ServiceRunFailureChance:           f.ServiceRunFailureChance.Rand(),
 		ServiceRunTime:                    f.ServiceRunTime.Rand(),
 		ServiceStartFailureChance:         f.ServiceStartFailureChance.Rand(),

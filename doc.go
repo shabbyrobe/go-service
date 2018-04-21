@@ -172,9 +172,10 @@ NewRunner() takes an implementation of the Listener interface:
 		// of your service have a place to go.
 	}
 
-	func (m *MyListener) OnServiceEnd(service Service, err Error) {
+	func (m *MyListener) OnServiceEnd(stage Stage, service Service, err Error) {
 		// This will always be called for every service whose Run() method
-		// stops normally (i.e. without panicking).
+		// stops, whether normally or in error, but will not be called if the
+		// service panics.
 	}
 
 	func (m *MyListener) OnServiceState(service Service, state State) {

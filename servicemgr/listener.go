@@ -7,7 +7,7 @@ import (
 )
 
 type Listener interface {
-	OnServiceEnd(service service.Service, err service.Error)
+	OnServiceEnd(stage service.Stage, service service.Service, err service.Error)
 }
 
 type NonHaltingErrorListener interface {
@@ -99,7 +99,7 @@ func (g *listenerDispatcher) OnServiceError(service service.Service, err service
 	}
 }
 
-func (g *listenerDispatcher) OnServiceEnd(service service.Service, err service.Error) {
+func (g *listenerDispatcher) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	g.lock.Lock()
 	l, ok := g.listeners[service]
 	if !ok {
@@ -110,7 +110,7 @@ func (g *listenerDispatcher) OnServiceEnd(service service.Service, err service.E
 	}
 	g.lock.Unlock()
 	if l != nil {
-		l.OnServiceEnd(service, err)
+		l.OnServiceEnd(stage, service, err)
 	}
 }
 

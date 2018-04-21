@@ -123,7 +123,8 @@ func TestMain(m *testing.M) {
 }
 
 type listenerCollectorEnd struct {
-	err error
+	stage Stage
+	err   error
 }
 
 type listenerCollectorService struct {
@@ -241,7 +242,7 @@ func (t *listenerCollector) OnServiceError(service Service, err Error) {
 	t.lock.Unlock()
 }
 
-func (t *listenerCollector) OnServiceEnd(service Service, err Error) {
+func (t *listenerCollector) OnServiceEnd(stage Stage, service Service, err Error) {
 	t.lock.Lock()
 	if t.services[service] == nil {
 		t.services[service] = &listenerCollectorService{}
@@ -249,7 +250,8 @@ func (t *listenerCollector) OnServiceEnd(service Service, err Error) {
 	svc := t.services[service]
 
 	svc.ends = append(svc.ends, &listenerCollectorEnd{
-		err: cause(err),
+		stage: stage,
+		err:   cause(err),
 	})
 	if len(svc.endWaiters) > 0 {
 		for _, w := range svc.endWaiters {
@@ -271,7 +273,7 @@ func (t *dummyListener) OnServiceState(service Service, state State) {}
 
 func (t *dummyListener) OnServiceError(service Service, err Error) {}
 
-func (t *dummyListener) OnServiceEnd(service Service, err Error) {}
+func (t *dummyListener) OnServiceEnd(stage Stage, service Service, err Error) {}
 
 type statService interface {
 	ServiceName() Name

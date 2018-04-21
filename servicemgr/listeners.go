@@ -51,7 +51,7 @@ func (f *FailureListener) Send(err error) {
 	}
 }
 
-func (f *FailureListener) OnServiceEnd(service service.Service, err service.Error) {
+func (f *FailureListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	if err != nil {
 		select {
 		case f.failures <- err:
@@ -109,7 +109,7 @@ func (e *EndListener) SendNonNil(err error) {
 	}
 }
 
-func (e *EndListener) OnServiceEnd(service service.Service, err service.Error) {
+func (e *EndListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	select {
 	case e.ends <- err:
 	default:

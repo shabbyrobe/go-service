@@ -97,10 +97,17 @@ type Listener interface {
 
 	// OnServiceEnd is called when your service ends. If the service responded
 	// because it was Halted, err will be nil, otherwise err MUST be set.
-	OnServiceEnd(service Service, err Error)
+	OnServiceEnd(stage Stage, service Service, err Error)
 
 	OnServiceState(service Service, state State)
 }
+
+type Stage int
+
+const (
+	StageReady Stage = 1
+	StageRun   Stage = 2
+)
 
 func EnsureHalt(r Runner, timeout time.Duration, s Service) error {
 	err := r.Halt(timeout, s)
@@ -229,13 +236,20 @@ func (r *runner) Start(service Service, ready ReadySignal) (err error) {
 		}
 
 		close(rs.halted)
+
+		stage := StageRun
+		if !readyCalled {
+			stage = StageReady
+		}
+
 		if !readyCalled && startingCalled && ready != nil {
 			// If the service ended while it was starting, Ready() will never
 			// be called.
 			ready.Done(&serviceError{name: service.ServiceName(), cause: err})
+		}
 
-		} else if r.listener != nil {
-			go r.listener.OnServiceEnd(service, WrapError(err, service))
+		if r.listener != nil {
+			go r.listener.OnServiceEnd(stage, service, WrapError(err, service))
 		}
 
 	}()

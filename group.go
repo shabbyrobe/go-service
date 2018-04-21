@@ -57,10 +57,12 @@ func (l *groupListener) OnServiceError(service Service, err Error) {
 	}
 }
 
-func (l *groupListener) OnServiceEnd(service Service, err Error) {
-	select {
-	case l.ends <- err:
-	case <-l.done:
+func (l *groupListener) OnServiceEnd(stage Stage, service Service, err Error) {
+	if stage == StageRun {
+		select {
+		case l.ends <- err:
+		case <-l.done:
+		}
 	}
 }
 

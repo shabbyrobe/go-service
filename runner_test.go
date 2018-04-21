@@ -213,7 +213,7 @@ func TestRunnerStartServiceEnds(t *testing.T) {
 
 	tt.MustOK(r.Start(s1, nil))
 	mustRecv(tt, ew, dto)
-	tt.MustEqual([]listenerCollectorEnd{{err: ErrServiceEnded}}, lc.ends(s1))
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageRun, err: ErrServiceEnded}}, lc.ends(s1))
 }
 
 func TestRunnerStartWaitErrorBeforeReady(t *testing.T) {
@@ -261,7 +261,9 @@ func TestRunnerStartFailureBeforeReadyPassedToSignal(t *testing.T) {
 	tt.MustOK(rn.Start(s1, rdy))
 	tt.MustEqual(serr, cause(WhenReady(dto, rdy)))
 
-	mustNotRecv(tt, ew)
+	// The start error should be passed to the failer
+	mustRecv(tt, ew, dto)
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: serr}}, lc.ends(s1))
 }
 
 func TestRunnerStartFailureBeforeReadyPassedToListenerWhenSignalIsNil(t *testing.T) {
@@ -293,7 +295,7 @@ func TestRunnerStartWaitServiceEndsAfterReady(t *testing.T) {
 
 	tt.MustOK(r.StartWait(dto, s1))
 	mustRecv(tt, ew, dto)
-	tt.MustEqual([]listenerCollectorEnd{{err: ErrServiceEnded}}, lc.ends(s1))
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageRun, err: ErrServiceEnded}}, lc.ends(s1))
 }
 
 func TestRunnerStartWaitServiceEndsBeforeReady(t *testing.T) {
@@ -579,7 +581,8 @@ func TestRunnerRegisterMultiple(t *testing.T) {
 
 	tt.MustOK(r.Unregister(s1))
 	tt.MustEqual(0, len(r.Services(FindRegistered)))
-	tt.MustAssert(IsErrServiceUnknown(r.Unregister(s1)))
+	_, err := r.Unregister(s1)
+	tt.MustAssert(IsErrServiceUnknown(err))
 }
 
 func TestRunnerUnregister(t *testing.T) {
@@ -596,7 +599,8 @@ func TestRunnerUnregister(t *testing.T) {
 	tt.MustEqual(Halted, r.State(s1))
 
 	tt.MustOK(r.Unregister(s1))
-	tt.MustAssert(IsErrServiceUnknown(r.Unregister(s1)))
+	_, err := r.Unregister(s1)
+	tt.MustAssert(IsErrServiceUnknown(err))
 }
 
 func TestRunnerUnregisterWhileNotHalted(t *testing.T) {
@@ -889,7 +893,7 @@ func TestRunnerServiceEndedNotRetained(t *testing.T) {
 
 	tt.MustOK(r.Start(s1, nil))
 	mustRecv(tt, ew, dto)
-	tt.MustEqual([]listenerCollectorEnd{{err: ErrServiceEnded}}, lc.ends(s1))
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageRun, err: ErrServiceEnded}}, lc.ends(s1))
 
 	services := r.Services(AnyState)
 	tt.MustEqual(0, len(services))

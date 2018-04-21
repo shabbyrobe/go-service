@@ -90,6 +90,7 @@ func (d *dummyService) Run(ctx service.Context) error {
 }
 
 type listenerErr struct {
+	stage   service.Stage
 	service service.Service
 	err     service.Error
 }
@@ -134,9 +135,9 @@ func newTestingListener(cap int) *testingListener {
 
 var _ Listener = &testingListener{}
 
-func (t *testingListener) OnServiceEnd(service service.Service, err service.Error) {
+func (t *testingListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	select {
-	case t.ends <- listenerErr{service: service, err: err}:
+	case t.ends <- listenerErr{stage: stage, service: service, err: err}:
 	default:
 	}
 }

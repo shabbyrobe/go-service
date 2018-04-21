@@ -176,7 +176,8 @@ func TestGroupStartError(t *testing.T) {
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 1, 0, s3)
 
-	mustNotRecv(tt, ew)
+	// The start error should be passed to the failer
+	mustRecv(tt, ew, dto)
 
 	tt.MustEqual(Halted, r.State(g))
 }
@@ -196,17 +197,21 @@ func TestGroupStartMultipleErrors(t *testing.T) {
 	g := NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
-	tt.MustEqual([]error{e1, e2}, causeListSorted(cause(r.StartWait(dto, g))))
+	expErr := []error{e1, e2}
+	foundErr := cause(r.StartWait(dto, g))
+	tt.MustEqual(expErr, causeListSorted(foundErr))
 
 	assertStartHaltCount(tt, 1, 1, s1)
 	assertStartHaltCount(tt, 1, 0, s2, s3)
 
-	mustNotRecv(tt, ew)
+	// The start error should be passed to the failer
+	mustRecv(tt, ew, dto)
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: foundErr}}, lc.ends(g))
 
 	tt.MustEqual(Halted, r.State(g))
 }
 
-func TestGroupRunnerError(t *testing.T) {
+func TestGroupRunnerErrorWithFailingStart(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	e1 := errors.New("start failure")
@@ -233,7 +238,9 @@ func TestGroupRunnerError(t *testing.T) {
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 0, 0, s3)
 
-	mustNotRecv(tt, ew)
+	// The start error should be passed to the failer
+	mustRecv(tt, ew, dto)
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: e1}}, lc.ends(g))
 
 	tt.MustEqual(Halted, r.State(g))
 }
