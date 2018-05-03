@@ -224,6 +224,9 @@ func (r *runner) Start(service Service, ready ReadySignal) (err error) {
 	ctx := newSvcContext(service, r.Ready, r.OnError, rs.done)
 
 	go func() {
+		// Careful! stateLock is not locked in here. Anything you touch in
+		// the runnerState must take care to synchronise.
+
 		err := service.Run(ctx)
 		startingCalled, readyCalled := rs.StartingCalled(), rs.ReadyCalled()
 		wasStarted := err != nil
@@ -365,23 +368,23 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
-	var svc = r.states[service]
-	if svc == nil {
-		svc = newRunnerState()
-		r.states[service] = svc
+	var rs = r.states[service]
+	if rs == nil {
+		rs = newRunnerState()
+		r.states[service] = rs
 	} else {
-		svc.SetReadyCalled(false)
-		svc.SetStartingCalled(false)
+		rs.SetReadyCalled(false)
+		rs.SetStartingCalled(false)
 	}
 
-	if err := svc.changer.SetStarting(); err != nil {
+	if err := rs.changer.SetStarting(); err != nil {
 		return err
 	}
 
-	svc.SetStartingCalled(true)
-	svc.ready = ready
-	svc.done = make(chan struct{})
-	svc.halted = make(chan struct{})
+	rs.SetStartingCalled(true)
+	rs.ready = ready
+	rs.done = make(chan struct{})
+	rs.halted = make(chan struct{})
 
 	if r.listener != nil {
 		go r.listener.OnServiceState(service, Starting)
@@ -426,6 +429,33 @@ func (r *runner) Ready(service Service) error {
 	return nil
 }
 
+func (r *runner) Halting(service Service) error {
+	r.statesLock.Lock()
+	defer r.statesLock.Unlock()
+
+	if r.states[service] == nil {
+		return errServiceUnknown(0)
+	}
+	if err := r.states[service].changer.SetHalting(); err != nil {
+		return err
+	}
+	if r.listener != nil {
+		go r.listener.OnServiceState(service, Halting)
+	}
+	return nil
+}
+
+func (r *runner) Halted(service Service) error {
+	r.statesLock.Lock()
+	defer r.statesLock.Unlock()
+
+	rs := r.states[service]
+	if rs == nil {
+		return errServiceUnknown(0)
+	}
+	return r.shutdown(rs, service)
+}
+
 // ended is used to bring the state of the service to a Halted state
 // if it ends before Halt is called.
 func (r *runner) ended(service Service) error {
@@ -445,39 +475,7 @@ func (r *runner) ended(service Service) error {
 	return r.shutdown(rs, service)
 }
 
-func (r *runner) Halting(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-	return r.halting(service)
-}
-
-func (r *runner) halting(service Service) error {
-	if r.states[service] == nil {
-		return errServiceUnknown(0)
-	}
-	if err := r.states[service].changer.SetHalting(); err != nil {
-		return err
-	}
-	if r.listener != nil {
-		go r.listener.OnServiceState(service, Halting)
-	}
-	return nil
-}
-
-func (r *runner) Halted(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-	return r.halted(service)
-}
-
-func (r *runner) halted(service Service) error {
-	rs := r.states[service]
-	if rs == nil {
-		return errServiceUnknown(0)
-	}
-	return r.shutdown(rs, service)
-}
-
+// shutdown assumes r.statesLock is acquired.
 func (r *runner) shutdown(rs *runnerState, service Service) error {
 	if err := rs.changer.SetHalted(); err != nil {
 		return err
