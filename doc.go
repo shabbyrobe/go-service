@@ -70,8 +70,8 @@ will result in Undefined Behaviour (uh-oh!):
 
 	- <-ctx.Done() MUST be included in any select {} block
 
-	- ctx.IsDone() MUST be checked more frequently than your application's halt
-	  timeout if <-ctx.Done() is not used.
+	- service.IsDone(ctx) MUST be checked more frequently than your
+	  application's halt timeout if <-ctx.Done() is not used.
 
 	- If Run() ends before it is halted by a Runner, an error MUST be returned.
 	  If there is no obvious application specific error to return in this case,

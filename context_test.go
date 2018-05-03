@@ -37,7 +37,7 @@ var TestingDone bool
 func BenchmarkContextIsDoneNil(b *testing.B) {
 	ctx := newSvcContext(nil, nil, nil, nil)
 	for i := 0; i < b.N; i++ {
-		TestingDone = ctx.IsDone()
+		TestingDone = IsDone(ctx)
 	}
 }
 
@@ -46,7 +46,7 @@ func BenchmarkContextIsDoneClosed(b *testing.B) {
 	close(ch)
 	ctx := newSvcContext(nil, nil, nil, ch)
 	for i := 0; i < b.N; i++ {
-		TestingDone = ctx.IsDone()
+		TestingDone = IsDone(ctx)
 	}
 }
 
@@ -54,6 +54,6 @@ func BenchmarkContextIsDoneOpen(b *testing.B) {
 	ch := make(chan struct{})
 	ctx := newSvcContext(nil, nil, nil, ch)
 	for i := 0; i < b.N; i++ {
-		TestingDone = ctx.IsDone()
+		TestingDone = IsDone(ctx)
 	}
 }

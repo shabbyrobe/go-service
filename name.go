@@ -9,6 +9,8 @@ type Name string
 
 func (s Name) Append(name string) Name { return Name(string(s) + "/" + name) }
 
+func (s Name) AppendName(name Name) Name { return Name(string(s) + "/" + string(name)) }
+
 func (s Name) Empty() bool { return s == "" }
 
 func (s Name) AppendUnique() Name {

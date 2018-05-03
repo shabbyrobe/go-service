@@ -8,16 +8,15 @@ import (
 
 const MinHaltableSleep = 50 * time.Millisecond
 
-// Context is passed to a Service's Run() method. It is used to signal
-// that the service is ready, to receive the signal to halt or to relay
-// non-fatal errors to the Runner's listener.
+// Context is passed to a Service's Run() method. It is used to signal that the
+// service is ready, to receive the signal to halt, or to relay non-fatal
+// errors to the Runner's listener.
+//
+// All services must either include Context.Done() in their select loop, or
+// regularly poll service.IsDone(ctx) if they don't make use of one.
+//
 type Context interface {
 	context.Context
-
-	// IsDone returns true if the service has been instructed to halt by
-	// its runner. All services should either regularly poll this, or
-	// include Done() in their select loop.
-	IsDone() bool
 
 	// Ready MUST be called by all services when they have finished
 	// their setup routines and are considered "Ready" to run.
@@ -143,9 +142,13 @@ func (c *svcContext) OnError(err error) { c.errFunc(c.service, err) }
 
 func (c *svcContext) Done() <-chan struct{} { return c.done }
 
-func (c *svcContext) IsDone() bool {
+// IsDone returns true if the context has been cancelled.
+//
+// If you have a service which does not use a for/select block, you can
+// poll the context with this method.
+func IsDone(ctx context.Context) bool {
 	select {
-	case <-c.done:
+	case <-ctx.Done():
 		return true
 	default:
 		return false
