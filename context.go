@@ -132,7 +132,12 @@ func newSvcContext(service Service, readyFunc readyFunc, errFunc errFunc, done c
 
 func (c *svcContext) Deadline() (deadline time.Time, ok bool) { return }
 
-func (c *svcContext) Err() error { return nil }
+func (c *svcContext) Err() error {
+	if IsDone(c) {
+		return context.Canceled
+	}
+	return nil
+}
 
 func (c *svcContext) Value(key interface{}) interface{} { return nil }
 

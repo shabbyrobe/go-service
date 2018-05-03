@@ -1,8 +1,6 @@
 package service
 
 import (
-	"errors"
-	"math/rand"
 	"testing"
 
 	"github.com/shabbyrobe/golib/assert"
@@ -10,33 +8,8 @@ import (
 
 type changer func(then func(err error) error) (err error)
 
-func TestStateChangerThen(t *testing.T) {
-	var (
-		sentinel     = errors.New("")
-		sentinelThen = func(err error) error { return sentinel }
-	)
-
-	tt := assert.WrapTB(t)
-	sc := newStateChanger()
-
-	fns := []func(then func(err error) error) (err error){
-		sc.SetStarted, sc.SetHalted, sc.SetHalting,
-	}
-	for i := 0; i < 1000; i++ {
-		idx := rand.Intn(len(fns))
-
-		// Sentinel should always be returned regardless of state
-		tt.MustEqual(sentinel, fns[idx](sentinelThen))
-	}
-}
-
 func TestStateChangerErrorPassthrough(t *testing.T) {
 	var tt = assert.WrapTB(t)
-
-	thenners := []func(err error) error{
-		func(err error) error { return err },
-		nil,
-	}
 
 	var matrix = map[State]map[State]bool{
 		Halting:  map[State]bool{Halted: true, Starting: false, Started: false, Halting: false},
@@ -52,27 +25,25 @@ func TestStateChangerErrorPassthrough(t *testing.T) {
 		Starting: Halted,
 	}
 
-	for _, then := range thenners {
-		for from, tos := range matrix {
-			for to, success := range tos {
-				sc := &stateChanger{state: from}
-				var result error
-				switch to {
-				case Halted:
-					result = sc.SetHalted(then)
-				case Starting:
-					result = sc.SetStarting(then)
-				case Started:
-					result = sc.SetStarted(then)
-				case Halting:
-					result = sc.SetHalting(then)
-				}
-				if !success {
-					exp := &errState{Expected: froms[to], To: to, Current: from}
-					tt.MustEqual(exp.Error(), result.Error())
-				} else {
-					tt.MustAssert(result == nil)
-				}
+	for from, tos := range matrix {
+		for to, success := range tos {
+			sc := &stateChanger{state: from}
+			var result error
+			switch to {
+			case Halted:
+				result = sc.SetHalted()
+			case Starting:
+				result = sc.SetStarting()
+			case Started:
+				result = sc.SetStarted()
+			case Halting:
+				result = sc.SetHalting()
+			}
+			if !success {
+				exp := &errState{Expected: froms[to], To: to, Current: from}
+				tt.MustEqual(exp.Error(), result.Error())
+			} else {
+				tt.MustAssert(result == nil)
 			}
 		}
 	}

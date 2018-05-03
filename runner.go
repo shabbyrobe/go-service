@@ -374,7 +374,7 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 		svc.SetStartingCalled(false)
 	}
 
-	if err := svc.changer.SetStarting(nil); err != nil {
+	if err := svc.changer.SetStarting(); err != nil {
 		return err
 	}
 
@@ -409,7 +409,7 @@ func (r *runner) Ready(service Service) error {
 	}
 
 	var serr *errState
-	if err := rs.changer.SetStarted(nil); err != nil {
+	if err := rs.changer.SetStarted(); err != nil {
 		var ok bool
 		if serr, ok = err.(*errState); ok {
 			// State errors don't matter here -
@@ -434,7 +434,7 @@ func (r *runner) ended(service Service) error {
 
 	rs := r.states[service]
 
-	if err := rs.changer.SetHalting(nil); IsErrNotRunning(err) {
+	if err := rs.changer.SetHalting(); IsErrNotRunning(err) {
 		return nil
 	} else if err != nil {
 		return err
@@ -455,7 +455,7 @@ func (r *runner) halting(service Service) error {
 	if r.states[service] == nil {
 		return errServiceUnknown(0)
 	}
-	if err := r.states[service].changer.SetHalting(nil); err != nil {
+	if err := r.states[service].changer.SetHalting(); err != nil {
 		return err
 	}
 	if r.listener != nil {
@@ -479,7 +479,7 @@ func (r *runner) halted(service Service) error {
 }
 
 func (r *runner) shutdown(rs *runnerState, service Service) error {
-	if err := rs.changer.SetHalted(nil); err != nil {
+	if err := rs.changer.SetHalted(); err != nil {
 		return err
 	}
 	if !rs.retain {

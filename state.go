@@ -93,7 +93,7 @@ func (s *stateChanger) State() State {
 func (s *stateChanger) Lock()   { s.lock.Lock() }
 func (s *stateChanger) Unlock() { s.lock.Unlock() }
 
-func (s *stateChanger) SetHalting(then func(err error) error) (err error) {
+func (s *stateChanger) SetHalting() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -102,13 +102,10 @@ func (s *stateChanger) SetHalting(then func(err error) error) (err error) {
 	} else {
 		s.state = Halting
 	}
-	if then != nil {
-		err = then(err)
-	}
 	return
 }
 
-func (s *stateChanger) SetStarting(then func(err error) error) (err error) {
+func (s *stateChanger) SetStarting() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -117,13 +114,10 @@ func (s *stateChanger) SetStarting(then func(err error) error) (err error) {
 	} else {
 		s.state = Starting
 	}
-	if then != nil {
-		err = then(err)
-	}
 	return
 }
 
-func (s *stateChanger) SetStarted(then func(err error) error) (err error) {
+func (s *stateChanger) SetStarted() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -132,13 +126,10 @@ func (s *stateChanger) SetStarted(then func(err error) error) (err error) {
 	} else {
 		s.state = Started
 	}
-	if then != nil {
-		err = then(err)
-	}
 	return
 }
 
-func (s *stateChanger) SetHalted(then func(err error) error) (err error) {
+func (s *stateChanger) SetHalted() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -147,9 +138,6 @@ func (s *stateChanger) SetHalted(then func(err error) error) (err error) {
 		err = &errState{Halting, Halted, s.state}
 	} else {
 		s.state = Halted
-	}
-	if then != nil {
-		err = then(err)
 	}
 	return
 }
