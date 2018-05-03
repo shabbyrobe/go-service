@@ -146,7 +146,7 @@ func MustEnsureHalt(r Runner, timeout time.Duration, s Service) {
 }
 
 type runnerState struct {
-	changer        *stateChanger
+	state          State
 	startingCalled int32
 	readyCalled    int32
 	retain         bool
@@ -173,6 +173,10 @@ func (r *runnerState) SetReadyCalled(v bool) {
 	atomic.StoreInt32(&r.readyCalled, vi)
 }
 
+func (r *runnerState) State() State {
+	return r.state
+}
+
 type runner struct {
 	listener Listener
 
@@ -193,7 +197,7 @@ func (r *runner) Services(query StateQuery) []Service {
 
 	out := make([]Service, 0, len(r.states))
 	for service, rs := range r.states {
-		if query.Match(rs.changer.State(), rs.retain) {
+		if query.Match(rs.State(), rs.retain) {
 			out = append(out, service)
 		}
 	}
@@ -265,7 +269,7 @@ func (r *runner) State(service Service) State {
 	defer r.statesLock.Unlock()
 	rs := r.states[service]
 	if rs != nil {
-		return rs.changer.State()
+		return rs.State()
 	}
 	return Halted
 }
@@ -377,7 +381,7 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 		rs.SetStartingCalled(false)
 	}
 
-	if err := rs.changer.SetStarting(); err != nil {
+	if err := rs.state.set(Starting); err != nil {
 		return err
 	}
 
@@ -412,7 +416,7 @@ func (r *runner) Ready(service Service) error {
 	}
 
 	var serr *errState
-	if err := rs.changer.SetStarted(); err != nil {
+	if err := rs.state.set(Started); err != nil {
 		var ok bool
 		if serr, ok = err.(*errState); ok {
 			// State errors don't matter here -
@@ -436,7 +440,7 @@ func (r *runner) Halting(service Service) error {
 	if r.states[service] == nil {
 		return errServiceUnknown(0)
 	}
-	if err := r.states[service].changer.SetHalting(); err != nil {
+	if err := r.states[service].state.set(Halting); err != nil {
 		return err
 	}
 	if r.listener != nil {
@@ -464,7 +468,7 @@ func (r *runner) ended(service Service) error {
 
 	rs := r.states[service]
 
-	if err := rs.changer.SetHalting(); IsErrNotRunning(err) {
+	if err := rs.state.set(Halting); IsErrNotRunning(err) {
 		return nil
 	} else if err != nil {
 		return err
@@ -477,7 +481,7 @@ func (r *runner) ended(service Service) error {
 
 // shutdown assumes r.statesLock is acquired.
 func (r *runner) shutdown(rs *runnerState, service Service) error {
-	if err := rs.changer.SetHalted(); err != nil {
+	if err := rs.state.set(Halted); err != nil {
 		return err
 	}
 	if !rs.retain {
@@ -511,7 +515,7 @@ func (r *runner) Unregister(service Service) (deferred bool, rerr error) {
 		return false, errServiceUnknown(0)
 	}
 
-	state := rs.changer.State()
+	state := rs.state
 	deferred = state != Halted
 
 	if deferred {
@@ -524,6 +528,6 @@ func (r *runner) Unregister(service Service) (deferred bool, rerr error) {
 
 func newRunnerState() *runnerState {
 	return &runnerState{
-		changer: newStateChanger(),
+		state: Halted,
 	}
 }

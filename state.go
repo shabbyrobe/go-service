@@ -1,7 +1,16 @@
 package service
 
 import (
-	"sync"
+	"fmt"
+)
+
+// State should not be used as a flag by external consumers of this package.
+const (
+	NoState State = 0
+	Halted  State = 1 << iota
+	Starting
+	Started
+	Halting
 )
 
 type State int
@@ -16,6 +25,8 @@ func (s State) String() string {
 		return "starting"
 	case Started:
 		return "started"
+	case Started | Starting:
+		return "started or starting"
 	case Halting:
 		return "halting"
 	default:
@@ -23,13 +34,30 @@ func (s State) String() string {
 	}
 }
 
-const (
-	NoState State = iota
-	Halted
-	Starting
-	Started
-	Halting
-)
+func (s State) validFrom() State {
+	switch s {
+	case Starting:
+		return Halted
+	case Started:
+		return Starting
+	case Halting:
+		return Started | Starting
+	case Halted:
+		return Halting
+	default:
+		panic(fmt.Sprintf("invalid state %d", s))
+	}
+}
+
+func (s *State) set(next State) (err error) {
+	from := next.validFrom()
+	sv := *s
+	if from&sv != sv {
+		return &errState{from, next, sv}
+	}
+	*s = next
+	return nil
+}
 
 type StateQuery int
 
@@ -73,71 +101,3 @@ const (
 	FindRunning    = FindStarting | FindStarted
 	FindNotRunning = FindHalting | FindHalted
 )
-
-type stateChanger struct {
-	state State
-	lock  sync.RWMutex
-}
-
-func newStateChanger() *stateChanger {
-	return &stateChanger{state: Halted}
-}
-
-func (s *stateChanger) State() State {
-	s.lock.RLock()
-	ret := s.state
-	s.lock.RUnlock()
-	return ret
-}
-
-func (s *stateChanger) Lock()   { s.lock.Lock() }
-func (s *stateChanger) Unlock() { s.lock.Unlock() }
-
-func (s *stateChanger) SetHalting() (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.state != Started && s.state != Starting {
-		err = &errState{Starting | Started, Halting, s.state}
-	} else {
-		s.state = Halting
-	}
-	return
-}
-
-func (s *stateChanger) SetStarting() (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.state != Halted {
-		err = &errState{Halted, Starting, s.state}
-	} else {
-		s.state = Starting
-	}
-	return
-}
-
-func (s *stateChanger) SetStarted() (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.state != Starting {
-		err = &errState{Starting, Started, s.state}
-	} else {
-		s.state = Started
-	}
-	return
-}
-
-func (s *stateChanger) SetHalted() (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	// if s.state != Halting && s.state != Started {
-	if s.state != Halting {
-		err = &errState{Halting, Halted, s.state}
-	} else {
-		s.state = Halted
-	}
-	return
-}

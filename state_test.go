@@ -9,8 +9,6 @@ import (
 type changer func(then func(err error) error) (err error)
 
 func TestStateChangerErrorPassthrough(t *testing.T) {
-	var tt = assert.WrapTB(t)
-
 	var matrix = map[State]map[State]bool{
 		Halting:  map[State]bool{Halted: true, Starting: false, Started: false, Halting: false},
 		Halted:   map[State]bool{Halted: false, Starting: true, Started: false, Halting: false},
@@ -25,26 +23,28 @@ func TestStateChangerErrorPassthrough(t *testing.T) {
 		Starting: Halted,
 	}
 
-	for from, tos := range matrix {
-		for to, success := range tos {
-			sc := &stateChanger{state: from}
-			var result error
-			switch to {
-			case Halted:
-				result = sc.SetHalted()
-			case Starting:
-				result = sc.SetStarting()
-			case Started:
-				result = sc.SetStarted()
-			case Halting:
-				result = sc.SetHalting()
-			}
-			if !success {
-				exp := &errState{Expected: froms[to], To: to, Current: from}
-				tt.MustEqual(exp.Error(), result.Error())
-			} else {
-				tt.MustAssert(result == nil)
-			}
+	states := []State{Halted, Starting, Started, Halting}
+
+	for _, from := range states {
+		tos := matrix[from]
+
+		for _, to := range states {
+			success := tos[to]
+
+			t.Run("", func(t *testing.T) {
+				var tt = assert.WrapTB(t)
+
+				sc := from
+				result := sc.set(to)
+
+				if !success {
+					exp := &errState{Expected: froms[to], To: to, Current: from}
+					tt.MustAssert(result != nil, "expected error %q when trying to transition from %q to %q, state=%q", exp, from, to, sc)
+					tt.MustEqual(exp.Error(), result.Error())
+				} else {
+					tt.MustAssert(result == nil, "expected no error, found %q when trying to transition from %q to %q", result, from, to)
+				}
+			})
 		}
 	}
 }
