@@ -324,9 +324,7 @@ func TestRunnerMetaFuzzInsanity(t *testing.T) {
 			fz.Stats = stats
 			fz.Run(tt)
 			if testing.Verbose() {
-				e := json.NewEncoder(os.Stdout)
-				e.SetIndent("", "  ")
-				e.Encode(stats.Clone())
+				fuzzOutput(fuzzOutputFormat, stats, os.Stdout)
 			}
 		})
 		i++
@@ -355,13 +353,7 @@ func testFuzz(t *testing.T, fz *RunnerFuzzer) {
 	fz.Run(assert.WrapTB(t))
 
 	if testing.Verbose() {
-		e := json.NewEncoder(os.Stdout)
-		e.SetIndent("", "  ")
-		e.Encode(fz.Stats.Clone())
-
-		fmt.Println("ServicesCurrent", fz.Stats.ServicesCurrent)
-		fmt.Println("Starts", fz.Stats.Starts())
-		fmt.Println("Ends", fz.Stats.Ends())
+		fuzzOutput(fuzzOutputFormat, fz.Stats, os.Stdout)
 	}
 }
 
@@ -610,11 +602,7 @@ func (r *RunnerFuzzer) runService(service Service, stats *ServiceStats) {
 			close(syncHalt)
 		}
 
-		// If StartWait returns a timeout, the listener gets an ended
-		// and the current services decrements there.
-		if err == nil || IsErrWaitTimeout(cause(err)) {
-			r.Stats.AddServicesCurrent(1)
-		}
+		r.Stats.AddServicesCurrent(1)
 
 		if willRegisterAfter {
 			_ = runner.Register(service)
@@ -717,6 +705,7 @@ func (r *RunnerFuzzer) OnServiceEnd(stage Stage, service Service, err Error) {
 		s = r.Stats.ServiceStats
 	}
 	s.AddServiceEnd(err)
+
 	r.Stats.AddServicesCurrent(-1)
 }
 
@@ -851,14 +840,14 @@ func (s *Stats) StatsForService(svc Service) *ServiceStats {
 }
 
 func (s *Stats) Starts() int {
-	return s.ServiceStats.ServiceStart.Succeeded() +
-		s.ServiceStats.ServiceStartWait.Succeeded() +
-		s.GroupStats.ServiceStart.Succeeded() +
-		s.GroupStats.ServiceStartWait.Succeeded()
+	return s.ServiceStats.ServiceStart.Total() +
+		s.ServiceStats.ServiceStartWait.Total() +
+		s.GroupStats.ServiceStart.Total() +
+		s.GroupStats.ServiceStartWait.Total()
 }
 
 func (s *Stats) Ends() int {
-	return int(s.ServiceStats.ServiceEnded) + int(s.GroupStats.ServiceEnded)
+	return int(s.ServiceStats.ServiceEnded()) + int(s.GroupStats.ServiceEnded())
 }
 
 func (s *Stats) Start() {
@@ -907,6 +896,25 @@ func (s *Stats) Map() map[string]interface{} {
 	}
 }
 
+func (s *Stats) MarshalJSON() ([]byte, error) {
+	// Strip off the methods before marshalling to avoid errant recursion:
+	type stats Stats
+	ss := (*stats)(s)
+
+	bts, err := json.Marshal(ss)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(bts, &m); err != nil {
+		return nil, err
+	}
+	m["Starts"] = s.Starts()
+	m["Ends"] = s.Ends()
+
+	return json.Marshal(m)
+}
+
 func (s *Stats) Clone() *Stats {
 	n := NewStats()
 	n.Duration = time.Since(s.start)
@@ -936,12 +944,12 @@ func (s *Stats) Clone() *Stats {
 }
 
 type ServiceStats struct {
-	ServiceErrors     map[string]int
-	serviceErrorsLock sync.Mutex
+	serviceErrors     map[string]int
+	serviceErrorsLock sync.RWMutex
 
-	ServiceEnded    int32
-	ServiceEnds     map[string]int
-	serviceEndsLock sync.Mutex
+	serviceEnds     map[string]int
+	serviceEnded    int
+	serviceEndsLock sync.RWMutex
 
 	ServiceHalt                 *ErrorCounter
 	ServiceStart                *ErrorCounter
@@ -954,8 +962,8 @@ type ServiceStats struct {
 
 func NewServiceStats() *ServiceStats {
 	return &ServiceStats{
-		ServiceEnds:   make(map[string]int),
-		ServiceErrors: make(map[string]int),
+		serviceEnds:   make(map[string]int),
+		serviceErrors: make(map[string]int),
 
 		ServiceHalt:                 &ErrorCounter{},
 		ServiceStart:                &ErrorCounter{},
@@ -969,7 +977,7 @@ func NewServiceStats() *ServiceStats {
 
 func (s *ServiceStats) Map() map[string]interface{} {
 	return map[string]interface{}{
-		"ServiceEnded":                          s.GetServiceEnded(),
+		"ServiceEnded":                          s.ServiceEnded(),
 		"ServiceHalt.Succeeded":                 s.ServiceHalt.Succeeded(),
 		"ServiceHalt.Failed":                    s.ServiceHalt.Failed(),
 		"ServiceStart.Succeeded":                s.ServiceStart.Succeeded(),
@@ -987,14 +995,18 @@ func (s *ServiceStats) Map() map[string]interface{} {
 	}
 }
 
-func (s *ServiceStats) GetServiceEnded() int { return int(atomic.LoadInt32(&s.ServiceEnded)) }
-func (s *ServiceStats) AddServiceEnded()     { atomic.AddInt32(&s.ServiceEnded, 1) }
+func (s *ServiceStats) ServiceEnded() (out int) {
+	s.serviceEndsLock.RLock()
+	out = s.serviceEnded
+	s.serviceEndsLock.RUnlock()
+	return out
+}
 
 func (s *ServiceStats) AddServiceEnd(err error) {
-	s.AddServiceEnded()
 	s.serviceEndsLock.Lock()
+	s.serviceEnded++
 	for _, msg := range fuzzErrs(err) {
-		s.ServiceEnds[msg]++
+		s.serviceEnds[msg]++
 	}
 	s.serviceEndsLock.Unlock()
 }
@@ -1002,14 +1014,13 @@ func (s *ServiceStats) AddServiceEnd(err error) {
 func (s *ServiceStats) AddServiceError(err error) {
 	s.serviceErrorsLock.Lock()
 	for _, msg := range fuzzErrs(err) {
-		s.ServiceErrors[msg]++
+		s.serviceErrors[msg]++
 	}
 	s.serviceErrorsLock.Unlock()
 }
 
 func (s *ServiceStats) Clone() *ServiceStats {
 	n := NewServiceStats()
-	n.ServiceEnded = int32(s.GetServiceEnded())
 
 	n.ServiceHalt = s.ServiceHalt.Clone()
 	n.ServiceStart = s.ServiceStart.Clone()
@@ -1020,14 +1031,15 @@ func (s *ServiceStats) Clone() *ServiceStats {
 	n.ServiceRegisterBeforeStart = s.ServiceRegisterBeforeStart.Clone()
 
 	s.serviceEndsLock.Lock()
-	for m, c := range s.ServiceEnds {
-		n.ServiceEnds[m] = c
+	n.serviceEnded = s.serviceEnded
+	for m, c := range s.serviceEnds {
+		n.serviceEnds[m] = c
 	}
 	s.serviceEndsLock.Unlock()
 
 	s.serviceErrorsLock.Lock()
-	for m, c := range s.ServiceErrors {
-		n.ServiceErrors[m] = c
+	for m, c := range s.serviceErrors {
+		n.serviceErrors[m] = c
 	}
 	s.serviceErrorsLock.Unlock()
 
@@ -1200,13 +1212,16 @@ func (wg *condGroup) Wait() {
 }
 
 type ErrorCounter struct {
-	succeeded int32
-	failed    int32
+	succeeded int
+	failed    int
 	errors    map[string]int
-	lock      sync.Mutex
+	lock      sync.RWMutex
 }
 
 func (e *ErrorCounter) MarshalJSON() ([]byte, error) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+
 	out := map[string]interface{}{}
 	if e.succeeded > 0 {
 		out["Succeeded"] = e.succeeded
@@ -1220,33 +1235,56 @@ func (e *ErrorCounter) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-func (e *ErrorCounter) Succeeded() int { return int(atomic.LoadInt32(&e.succeeded)) }
-func (e *ErrorCounter) Failed() int {
-	e.lock.Lock()
-	out := e.failed
-	e.lock.Unlock()
-	return int(out)
+func (e *ErrorCounter) Total() (out int) {
+	e.lock.RLock()
+	out = e.succeeded + e.failed
+	e.lock.RUnlock()
+	return out
+}
+
+func (e *ErrorCounter) Succeeded() (out int) {
+	e.lock.RLock()
+	out = e.succeeded
+	e.lock.RUnlock()
+	return out
+}
+
+func (e *ErrorCounter) Failed() (out int) {
+	e.lock.RLock()
+	out = e.failed
+	e.lock.RUnlock()
+	return out
+}
+
+func (e *ErrorCounter) Percent() (out float64) {
+	e.lock.RLock()
+	total := e.succeeded + e.failed
+	if total > 0 {
+		out = float64(e.succeeded) / float64(total) * 100
+	}
+	e.lock.RUnlock()
+	return out
 }
 
 func (e *ErrorCounter) Clone() *ErrorCounter {
+	e.lock.RLock()
 	ec := &ErrorCounter{
-		succeeded: atomic.LoadInt32(&e.succeeded),
-		errors:    make(map[string]int),
+		succeeded: e.succeeded,
+		failed:    e.failed,
+		errors:    make(map[string]int, len(e.errors)),
 	}
-	e.lock.Lock()
-	ec.failed = e.failed
 	for k, v := range e.errors {
 		ec.errors[k] = v
 	}
-	e.lock.Unlock()
+	e.lock.RUnlock()
 	return ec
 }
 
 func (e *ErrorCounter) Add(err error) {
+	e.lock.Lock()
 	if err == nil {
-		atomic.AddInt32(&e.succeeded, 1)
+		e.succeeded++
 	} else {
-		e.lock.Lock()
 		e.failed++
 		if e.errors == nil {
 			e.errors = make(map[string]int)
@@ -1254,8 +1292,8 @@ func (e *ErrorCounter) Add(err error) {
 		for _, msg := range fuzzErrs(err) {
 			e.errors[msg]++
 		}
-		e.lock.Unlock()
 	}
+	e.lock.Unlock()
 }
 
 const debugWithin = true

@@ -205,7 +205,7 @@ func TestRunnerStartServiceEnds(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := &dummyService{} // should return immediately
+	s1 := &dummyService{} // service should end immediately after it is started.
 
 	lc := newListenerCollector()
 	r := NewRunner(lc)
@@ -235,15 +235,17 @@ func TestRunnerStartErrorBeforeReadyIsReturnedByWhenReady(t *testing.T) {
 
 	serr := errors.New("fail")
 	s1 := &dummyService{startFailure: serr}
-	r := NewRunner(newDummyListener())
+
+	lc := newListenerCollector()
+	r := NewRunner(lc)
 
 	rdy := NewReadySignal()
 	tt.MustOK(r.Start(s1, rdy))
 	result := cause(WhenReady(dto, rdy))
-	if result == nil {
-		panic(nil)
-	}
+	tt.MustAssert(result != nil)
 	tt.MustEqual(serr, result)
+
+	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: serr}}, lc.ends(s1))
 }
 
 func TestRunnerStartFailureBeforeReadyPassedToSignal(t *testing.T) {
@@ -261,7 +263,7 @@ func TestRunnerStartFailureBeforeReadyPassedToSignal(t *testing.T) {
 	tt.MustOK(rn.Start(s1, rdy))
 	tt.MustEqual(serr, cause(WhenReady(dto, rdy)))
 
-	// The start error should be passed to the failer
+	// The start error should be passed to the listener as well
 	mustRecv(tt, ew, dto)
 	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: serr}}, lc.ends(s1))
 }

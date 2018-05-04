@@ -2,15 +2,19 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"expvar"
 	"flag"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	netprof "net/http/pprof"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -23,27 +27,41 @@ const (
 	tscale = 5 * time.Millisecond
 
 	dto = 100 * tscale
+
+	formatJSON = "json"
+	formatCLI  = "cli"
 )
 
 var (
-	fuzzEnabled   bool
-	fuzzTimeStr   string
-	fuzzTimeDur   time.Duration
-	fuzzTickNsec  int64
-	fuzzSeed      int64
-	fuzzDebugHost string
-	fuzzMetaRolls int64
-	fuzzMetaMin   int
+	fuzzEnabled      bool
+	fuzzTimeStr      string
+	fuzzOutputFormat string
+	fuzzTimeDur      time.Duration
+	fuzzTickNsec     int64
+	fuzzSeed         int64
+	fuzzDebugHost    string
+	fuzzMetaRolls    int64
+	fuzzMetaMin      int
 )
 
 func TestMain(m *testing.M) {
-	flag.BoolVar(&fuzzEnabled, "service.fuzz", false, "Fuzz? Nope by default.")
-	flag.StringVar(&fuzzTimeStr, "service.fuzztime", "1s", "Run the fuzzer for this duration")
-	flag.Int64Var(&fuzzTickNsec, "service.fuzzticknsec", 0, "How frequently to tick in the fuzzer's loop.")
-	flag.Int64Var(&fuzzSeed, "service.fuzzseed", -1, "Randomise the fuzz tester with this non-negative seed prior to every fuzz test")
-	flag.StringVar(&fuzzDebugHost, "service.debughost", "", "Start a debug server at this host to allow expvars/pprof")
-	flag.Int64Var(&fuzzMetaRolls, "service.fuzzmetarolls", 20, "Re-roll the meta fuzz tester this many times")
-	flag.IntVar(&fuzzMetaMin, "service.fuzzmetamin", 5, "Minimum number of times to run the meta fuzzer regardless of duration")
+	flag.BoolVar(&fuzzEnabled, "service.fuzz", false,
+		"Fuzz? Nope by default.")
+	flag.StringVar(&fuzzTimeStr, "service.fuzztime", "1s",
+		"Run the fuzzer for this duration")
+	flag.Int64Var(&fuzzTickNsec, "service.fuzzticknsec", 0,
+		"How frequently to tick in the fuzzer's loop.")
+	flag.Int64Var(&fuzzSeed, "service.fuzzseed", -1,
+		"Randomise the fuzz tester with this non-negative seed prior to every fuzz test")
+	flag.StringVar(&fuzzDebugHost, "service.debughost", "",
+		"Start a debug server at this host to allow expvars/pprof")
+	flag.Int64Var(&fuzzMetaRolls, "service.fuzzmetarolls", 20,
+		"Re-roll the meta fuzz tester this many times")
+	flag.IntVar(&fuzzMetaMin, "service.fuzzmetamin", 5,
+		"Minimum number of times to run the meta fuzzer regardless of duration")
+	flag.StringVar(&fuzzOutputFormat, "service.fuzzoutfmt", "cli",
+		"Fuzz verbose output format (cli or json)")
+
 	flag.Parse()
 
 	var err error
@@ -296,6 +314,8 @@ type dummyService struct {
 func (d *dummyService) Starts() int { return int(atomic.LoadInt32(&d.starts)) }
 func (d *dummyService) Halts() int  { return int(atomic.LoadInt32(&d.halts)) }
 
+func (d *dummyService) StartFails() bool { return d.startFailure != nil }
+
 func (d *dummyService) ServiceName() Name {
 	if d.name == "" {
 		// This is a nasty cheat, don't do it in any real code!
@@ -434,6 +454,8 @@ type blockingService struct {
 func (d *blockingService) Starts() int { return int(atomic.LoadInt32(&d.starts)) }
 func (d *blockingService) Halts() int  { return int(atomic.LoadInt32(&d.halts)) }
 
+func (d *blockingService) StartFails() bool { return d.startFailure != nil }
+
 func (d *blockingService) Init() *blockingService {
 	d.init = true
 	if d.name == "" {
@@ -516,4 +538,166 @@ func causeListSorted(err error) (out []error) {
 	} else {
 		return []error{err}
 	}
+}
+
+func fuzzOutput(method string, stats *Stats, w io.Writer) {
+	var err error
+	stats = stats.Clone()
+	switch method {
+	case "json":
+		err = fuzzOutputJSON(stats, w)
+	default:
+		err = fuzzOutputCLI(stats, w)
+	}
+	if err != nil {
+		panic(err)
+	}
+}
+
+func fuzzOutputJSON(stats *Stats, w io.Writer) error {
+	e := json.NewEncoder(w)
+	e.SetIndent("", "  ")
+	return e.Encode(stats)
+}
+
+func fuzzOutputCLI(stats *Stats, w io.Writer) error {
+	var (
+		headingw   = 18
+		rowheadw   = 18
+		okerrw     = 8
+		heading    = func(v interface{}) string { return colorwr(lightBlue, headingw, ' ', v) }
+		rowhead    = func(v interface{}) string { return colorwr(lightBlue, rowheadw, ' ', v) }
+		subheading = func(v interface{}) string { return color(darkGray, v) }
+		value      = func(v interface{}) string { return color(white, v) }
+		colhead    = func(v interface{}) string { return colorwr(lightCyan, okerrw, ' ', v) }
+		pctcol     = func(v interface{}) string { return colorwr(lightGray, okerrw, ' ', v) }
+
+		okcol = func(v interface{}) string {
+			col := lightGreen
+			if v == 0 {
+				col = lightGray
+			}
+			return colorwr(col, okerrw, ' ', v)
+		}
+
+		errcol = func(v interface{}) string {
+			col := lightRed
+			if v == 0 {
+				col = lightGray
+			}
+			return colorwr(col, okerrw, ' ', v)
+		}
+	)
+
+	fmt.Fprintf(w, "%s  %s\n", heading("seed"), value(stats.Seed))
+	fmt.Fprintf(w, "%s  %s (%s)\n",
+		heading("duration"), color(lightCyan, stats.Duration),
+		color(lightCyan, stats.Tick),
+	)
+
+	fmt.Fprintf(w, "%s  ", heading("groups"))
+
+	minsz, maxsz := math.MaxInt64, 0
+	for sz := range stats.GroupSizes {
+		if sz > maxsz {
+			maxsz = sz
+		}
+		if sz < minsz {
+			minsz = sz
+		}
+	}
+
+	for i := minsz; i < maxsz; i++ {
+		cnt := stats.GroupSizes[i]
+		fmt.Fprintf(w, "%s:%s ",
+			color(lightGray, i),
+			color(yellow, cnt))
+	}
+	fmt.Fprintf(w, "\n")
+
+	fmt.Fprintf(w, "%s  %s/%s ", heading("starts/ends"), value(stats.Starts()), value(stats.Ends()))
+
+	diff := stats.Ends() - stats.Starts()
+	if diff != 0 {
+		fmt.Fprintf(w, "%s", color(red, diff))
+	}
+	fmt.Fprintf(w, "\n")
+
+	fmt.Fprintf(w, "%s  ", heading("states"))
+	for _, state := range States {
+		count := stats.StateCheckResults[state]
+		fmt.Fprintf(w, "%s:%s ", subheading(state.String()), value(count))
+	}
+	fmt.Fprintf(w, "\n")
+
+	fmt.Fprintf(w, "%s  %s:%s %s:%s %s:%s\n", heading("runners"),
+		subheading("current"), value(stats.RunnersCurrent),
+		subheading("halted"), value(stats.RunnersHalted),
+		subheading("started"), value(stats.RunnersStarted))
+
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "%s %s %s %s %s %s %s\n", rowhead(""),
+		colhead("svc ok"), colhead("svc err"), colhead("svc pct"),
+		colhead("grp ok"), colhead("grp err"), colhead("grp pct"))
+
+	counterRow := func(head string, svc, grp *ErrorCounter) {
+		fmt.Fprintf(w, "%s %s %s %s %s %s %s\n", rowhead(head),
+			okcol(svc.Succeeded()),
+			errcol(svc.Failed()),
+			pctcol(math.Round(svc.Percent())),
+			okcol(grp.Succeeded()),
+			errcol(grp.Failed()),
+			pctcol(math.Round(grp.Percent())))
+	}
+
+	counterRow("start", stats.ServiceStats.ServiceStart, stats.GroupStats.ServiceStart)
+	counterRow("start wait", stats.ServiceStats.ServiceStartWait, stats.GroupStats.ServiceStartWait)
+	counterRow("halt", stats.ServiceStats.ServiceHalt, stats.GroupStats.ServiceHalt)
+	counterRow("reg before start", stats.ServiceStats.ServiceRegisterBeforeStart, stats.GroupStats.ServiceRegisterBeforeStart)
+	counterRow("reg after start", stats.ServiceStats.ServiceRegisterAfterStart, stats.GroupStats.ServiceRegisterAfterStart)
+	counterRow("unregister halt", stats.ServiceStats.ServiceUnregisterHalt, stats.GroupStats.ServiceUnregisterHalt)
+	counterRow("unregister wat", stats.ServiceStats.ServiceUnregisterUnexpected, stats.GroupStats.ServiceUnregisterUnexpected)
+
+	fmt.Fprintf(w, "\n")
+
+	return nil
+}
+
+const (
+	black        = 30
+	red          = 31
+	green        = 32
+	yellow       = 33
+	blue         = 34
+	magenta      = 35
+	cyan         = 36
+	lightGray    = 37
+	darkGray     = 90
+	lightRed     = 91
+	lightGreen   = 92
+	lightYellow  = 93
+	lightBlue    = 94
+	lightMagenta = 95
+	lightCyan    = 96
+	white        = 97
+)
+
+func color(col int, v interface{}) string {
+	return fmt.Sprintf("\x1b[%dm%v\x1b[0m", col, v)
+}
+
+func colorwl(col int, w int, c byte, v interface{}) string {
+	vs := fmt.Sprintf("%v", v)
+	vl := len(vs)
+	vs += strings.Repeat(string(c), w-vl)
+	return fmt.Sprintf("\x1b[%dm%v\x1b[0m", col, vs)
+}
+
+func colorwr(col int, w int, c byte, v interface{}) string {
+	vs := fmt.Sprintf("%v", v)
+	cs := string(c)
+	for i := len(vs); i < w; i++ {
+		vs = cs + vs
+	}
+	return fmt.Sprintf("\x1b[%dm%v\x1b[0m", col, vs)
 }
