@@ -12,6 +12,8 @@ Quick Example
 	func (m *MyService) ServiceName() service.Name { return "My service" }
 
 	func (m *MyService) Run(ctx service.Context) error {
+		// note: service.Context is a context.Context
+
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
@@ -33,17 +35,21 @@ Quick Example
 
 Performance
 
-Services are by nature heavier than a regular goroutine; they're about 10x slower
-and use quite a bit more memory. You should probably only use Services when you
-need to fully control the management of a long-lived goroutine, otherwise
-they're likely not worth it:
+Services are by nature heavier than a regular goroutine; they're about 10x
+slower and use more memory. You should probably only use Services when you need
+to fully control the management of a long-lived goroutine, otherwise they're
+likely not worth it:
 
-	BenchmarkRunnerStart10-4      	   50000	     24519 ns/op	    4641 B/op	      90 allocs/op
-	BenchmarkGoroutineStart10-4   	 1000000	      2239 ns/op	       0 B/op	       0 allocs/op
+	BenchmarkRunnerStart1-4          	  500000	      2951 ns/op	     352 B/op	       6 allocs/op
+	BenchmarkGoroutineStart1-4       	 5000000	       368 ns/op	       0 B/op	       0 allocs/op
+	BenchmarkRunnerStart10-4         	  100000	     20429 ns/op	    3521 B/op	      60 allocs/op
+	BenchmarkGoroutineStart10-4      	  500000	      2933 ns/op	       0 B/op	       0 allocs/op
 
-There are opportunities for memory savings in the library, but the chief
-priority has been to get it working and stable, rather than fast. I don't plan
-to start 50,000 services a second in any app I am currently working on.
+There are plenty of opportunities for memory savings in the library, but the
+chief priority has been to get a working, stable and complete API first. I
+don't plan to start 50,000 services a second in any app I am currently working
+on, but this is not to say that optimising the library isn't important, it's
+just not a priority yet. YMMV.
 
 
 Services
@@ -70,7 +76,7 @@ will result in Undefined Behaviour (uh-oh!):
 
 	- <-ctx.Done() MUST be included in any select {} block
 
-	- service.IsDone(ctx) MUST be checked more frequently than your
+	- OR... service.IsDone(ctx) MUST be checked more frequently than your
 	  application's halt timeout if <-ctx.Done() is not used.
 
 	- If Run() ends before it is halted by a Runner, an error MUST be returned.
@@ -156,6 +162,46 @@ To start or halt a service, a Runner is required.
 	err := r.HaltAll(1 * time.Second)
 
 
+Contexts
+
+Service.Run receives a service.Context as its first parameter. service.Context
+implements context.Context (https://golang.org/pkg/context/).
+
+service.Context can be used exactly as a context.Context is used for your
+service code:
+
+	func (s *MyService) Run(ctx service.Context) error {
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+
+		dctx, cancel := context.WithDeadline(ctx, time.Now().Add(2 * time.Second))
+		defer cancel()
+
+		// This service will be "Done" either when the service is halted,
+		// or the deadline arrives (though in the latter case, the service
+		// will be considered to have ended prematurely)
+		<-dctx.Done()
+
+		// If the service wasn't halted (i.e. if the deadline elapsed), we must
+		// return an error to satisfy the service.Run contract outlined in the
+		// docs:
+		if !ctx.IsDone() {
+			returh errServiceEnded
+		}
+
+		return nil
+	}
+
+Services can not work without a cancelable context (how else would you implement
+runner.Halt?), so the service package assumes control of context creation. This
+is not ideal, but the context package provides no mechanism to detect whether a
+context has been wrapped with WithCancel, and no way to access the cancel()
+function via the context.Context itself. I haven't found a good way of allowing
+externally created contexts to be passed in without totally destroying the API
+yet, but it's definitely something I'm looking into.
+
+
 Listeners
 
 Errors may happen during a service's execution. Services may end prematurely.
@@ -166,20 +212,10 @@ NewRunner() takes an implementation of the Listener interface:
 
 	type MyListener struct {}
 
-	func (m *MyListener) OnServiceError(service Service, err Error) {
-		// This will be called every time you call ctx.OnError() in your
-		// service so non-fatal errors that occur during the lifetime
-		// of your service have a place to go.
-	}
-
 	func (m *MyListener) OnServiceEnd(stage Stage, service Service, err Error) {
 		// This will always be called for every service whose Run() method
 		// stops, whether normally or in error, but will not be called if the
 		// service panics.
-	}
-
-	func (m *MyListener) OnServiceState(service Service, state State) {
-		// This is called whenever a service transitions into a state.
 	}
 
 	func main() {
@@ -188,8 +224,24 @@ NewRunner() takes an implementation of the Listener interface:
 		// ...
 	}
 
-The Listener allows the parent context to respond to changes that may happen
-outside of the expected Start/Halt lifecycle.
+Every call to Runner.Start or Runner.StartWait is matched with a call to
+OnServiceEnd, regardless of whether the call to Start/StartWait failed at
+any stage, ended prematurely, or was halted by Runner.Halt. The err argument
+will be nil if the service was halted, but MUST be an error in any other
+circumstance.
+
+The Listener may also optionally implement service.ErrorListener and/or
+service.StateListener:
+
+	func (m *MyListener) OnServiceError(service Service, err Error) {
+		// This will be called every time you call ctx.OnError() in your
+		// service so non-fatal errors that occur during the lifetime
+		// of your service have a place to go.
+	}
+
+	func (m *MyListener) OnServiceState(service Service, state State) {
+		// This is called whenever a service transitions into a state.
+	}
 
 
 Restarting
@@ -199,8 +251,9 @@ carefully, it's also possible to start the same Service in multiple Runners.
 Maybe that's not a good idea, but who am I to judge? You might have a great
 reason.
 
-Some services may wish to explicitly block restart, in which case an atomic
-is a good way to prevent it:
+Some services may wish to explicitly block restart, such as services that
+wrap a net.Conn (which will not be available if the service fails). An
+atomic can be a good tool for this job:
 
 	type MyService struct {
 		used int32

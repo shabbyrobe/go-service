@@ -6,13 +6,16 @@ Goroutine lifecycle management: service
 service implements service-like goroutine lifecycle management.
 
 It is intended for use when you need to co-ordinate the state of one or more
-long-running goroutines and control startup and shutdown.
+long-running goroutines and control startup, shutdown and ready signalling.
 
 Key features:
 
 - Start and halt backgrounded goroutines (services)
 - Check the state of services
+- Wait until a service is "ready" (you decide what "ready" means)
 - Service groups (should start and halt together)
+- `context.Context` support (`service.Context` is a `context.Context`)
+
 
 It is loosely based on .NET/Java style thread classes.
 
@@ -61,6 +64,7 @@ func main() {
     }
 }
 ```
+
 
 Service Group
 -------------

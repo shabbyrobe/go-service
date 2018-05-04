@@ -14,6 +14,9 @@ type (
 
 // ErrServiceEnded is a sentinel error used to indicate that a service
 // ended prematurely but no obvious error that could be returned.
+//
+// It is a part of the public API so that consumers of this package can return
+// it from their own services.
 var ErrServiceEnded = errors.New("service ended")
 
 func (errWaitTimeout) Error() string    { return "service: wait timeout" }
@@ -23,6 +26,7 @@ func (errServiceUnknown) Error() string { return "service unknown" }
 func IsErrWaitTimeout(err error) bool    { _, ok := cause(err).(errWaitTimeout); return ok }
 func IsErrHaltTimeout(err error) bool    { _, ok := cause(err).(errHaltTimeout); return ok }
 func IsErrServiceUnknown(err error) bool { _, ok := cause(err).(errServiceUnknown); return ok }
+func IsErrServiceEnded(err error) bool   { return cause(err) == ErrServiceEnded }
 
 func IsErrNotRunning(err error) bool {
 	serr, ok := cause(err).(*errState)

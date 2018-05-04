@@ -1,14 +1,4 @@
-There's a defect I just can't pin down with StartWait and WhenReady and
-OnServiceEnd if the service is configured to return an error instantly.
+- service.WhenReady should take ctx so it can receive Done() signals from outside
 
-To reproduce, edit TestRunnerFuzzMessy like so:
+- Would be nice to be able to take a context from outside when starting a service.
 
-    ServiceStartTime:  TimeRange{500 * time.Microsecond, 500 * time.Microsecond},
-    StartWaitTimeout:  TimeRange{1, 1},
-    ServiceRunTime:    TimeRange{0, 500 * time.Millisecond},
-
-- service.WhenReady should take ctx so it can signal Done()
-- service.ErrServiceEnded should be private and have an assertion method
-- context.Context should be a first class citizen; this package seems to re-implement
-  half of it just because I couldn't see past the janky API. I get it now, and this
-  should use it.

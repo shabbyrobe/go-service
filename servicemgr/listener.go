@@ -6,35 +6,24 @@ import (
 	service "github.com/shabbyrobe/go-service"
 )
 
-type Listener interface {
-	OnServiceEnd(stage service.Stage, service service.Service, err service.Error)
-}
-
-type NonHaltingErrorListener interface {
-	Listener
-	OnServiceError(service service.Service, err service.Error)
-}
-
-type StateListener interface {
-	Listener
-	OnServiceState(service service.Service, state service.State)
-}
-
 type listenerDispatcher struct {
-	listeners        map[service.Service]Listener
-	listenersNHError map[service.Service]NonHaltingErrorListener
-	listenersState   map[service.Service]StateListener
+	listeners        map[service.Service]service.Listener
+	listenersNHError map[service.Service]service.ErrorListener
+	listenersState   map[service.Service]service.StateListener
 	retained         map[service.Service]bool
 
-	defaultListener service.Listener
-	lock            sync.Mutex
+	defaultListener      service.Listener
+	defaultErrorListener service.ErrorListener
+	defaultStateListener service.StateListener
+
+	lock sync.Mutex
 }
 
 func newListenerDispatcher() *listenerDispatcher {
 	return &listenerDispatcher{
-		listeners:        make(map[service.Service]Listener),
-		listenersNHError: make(map[service.Service]NonHaltingErrorListener),
-		listenersState:   make(map[service.Service]StateListener),
+		listeners:        make(map[service.Service]service.Listener),
+		listenersNHError: make(map[service.Service]service.ErrorListener),
+		listenersState:   make(map[service.Service]service.StateListener),
 		retained:         make(map[service.Service]bool),
 	}
 }
@@ -42,18 +31,21 @@ func newListenerDispatcher() *listenerDispatcher {
 func (g *listenerDispatcher) SetDefaultListener(l service.Listener) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
+
 	g.defaultListener = l
+	g.defaultErrorListener, _ = l.(service.ErrorListener)
+	g.defaultStateListener, _ = l.(service.StateListener)
 }
 
-func (g *listenerDispatcher) Add(service service.Service, l Listener) {
+func (g *listenerDispatcher) Add(svc service.Service, l service.Listener) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
-	g.listeners[service] = l
-	if el, ok := l.(NonHaltingErrorListener); ok {
-		g.listenersNHError[service] = el
+	g.listeners[svc] = l
+	if el, ok := l.(service.ErrorListener); ok {
+		g.listenersNHError[svc] = el
 	}
-	if sl, ok := l.(StateListener); ok {
-		g.listenersState[service] = sl
+	if sl, ok := l.(service.StateListener); ok {
+		g.listenersState[svc] = sl
 	}
 }
 
@@ -87,18 +79,6 @@ func (g *listenerDispatcher) remove(service service.Service) {
 	delete(g.retained, service)
 }
 
-func (g *listenerDispatcher) OnServiceError(service service.Service, err service.Error) {
-	g.lock.Lock()
-	l, ok := g.listenersNHError[service]
-	if !ok {
-		l = g.defaultListener
-	}
-	g.lock.Unlock()
-	if l != nil {
-		l.OnServiceError(service, err)
-	}
-}
-
 func (g *listenerDispatcher) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	g.lock.Lock()
 	l, ok := g.listeners[service]
@@ -114,11 +94,23 @@ func (g *listenerDispatcher) OnServiceEnd(stage service.Stage, service service.S
 	}
 }
 
+func (g *listenerDispatcher) OnServiceError(svc service.Service, err service.Error) {
+	g.lock.Lock()
+	l, ok := g.listenersNHError[svc]
+	if !ok {
+		l = g.defaultErrorListener
+	}
+	g.lock.Unlock()
+	if l != nil {
+		l.OnServiceError(svc, err)
+	}
+}
+
 func (g *listenerDispatcher) OnServiceState(service service.Service, state service.State) {
 	g.lock.Lock()
 	l, ok := g.listenersState[service]
 	if !ok {
-		l = g.defaultListener
+		l = g.defaultStateListener
 	}
 	g.lock.Unlock()
 	if l != nil {

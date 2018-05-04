@@ -16,7 +16,7 @@ type FailureListener struct {
 	failures chan error
 }
 
-var _ Listener = &FailureListener{}
+var _ service.Listener = &FailureListener{}
 
 func NewFailureListener(cap int) *FailureListener {
 	if cap < 1 {
@@ -74,7 +74,7 @@ type EndListener struct {
 	ends chan error
 }
 
-var _ Listener = &EndListener{}
+var _ service.Listener = &EndListener{}
 
 func NewEndListener(cap int) *EndListener {
 	if cap < 1 {

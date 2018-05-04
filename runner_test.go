@@ -238,6 +238,7 @@ func TestRunnerStartErrorBeforeReadyIsReturnedByWhenReady(t *testing.T) {
 
 	lc := newListenerCollector()
 	r := NewRunner(lc)
+	endc := lc.endWaiter(s1)
 
 	rdy := NewReadySignal()
 	tt.MustOK(r.Start(s1, rdy))
@@ -245,6 +246,7 @@ func TestRunnerStartErrorBeforeReadyIsReturnedByWhenReady(t *testing.T) {
 	tt.MustAssert(result != nil)
 	tt.MustEqual(serr, result)
 
+	<-endc
 	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: serr}}, lc.ends(s1))
 }
 

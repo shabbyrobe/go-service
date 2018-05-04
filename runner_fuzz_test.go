@@ -324,7 +324,7 @@ func TestRunnerMetaFuzzInsanity(t *testing.T) {
 			fz.Stats = stats
 			fz.Run(tt)
 			if testing.Verbose() {
-				fuzzOutput(fuzzOutputFormat, stats, os.Stdout)
+				fuzzOutput(fuzzOutputFormat, t.Name(), stats, os.Stdout)
 			}
 		})
 		i++
@@ -353,7 +353,7 @@ func testFuzz(t *testing.T, fz *RunnerFuzzer) {
 	fz.Run(assert.WrapTB(t))
 
 	if testing.Verbose() {
-		fuzzOutput(fuzzOutputFormat, fz.Stats, os.Stdout)
+		fuzzOutput(fuzzOutputFormat, t.Name(), fz.Stats, os.Stdout)
 	}
 }
 

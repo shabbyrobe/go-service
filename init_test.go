@@ -280,8 +280,7 @@ func (t *listenerCollector) OnServiceEnd(stage Stage, service Service, err Error
 	t.lock.Unlock()
 }
 
-type dummyListener struct {
-}
+type dummyListener struct{}
 
 func newDummyListener() *dummyListener {
 	return &dummyListener{}
@@ -540,31 +539,32 @@ func causeListSorted(err error) (out []error) {
 	}
 }
 
-func fuzzOutput(method string, stats *Stats, w io.Writer) {
+func fuzzOutput(method string, name string, stats *Stats, w io.Writer) {
 	var err error
 	stats = stats.Clone()
 	switch method {
 	case "json":
-		err = fuzzOutputJSON(stats, w)
+		err = fuzzOutputJSON(name, stats, w)
 	default:
-		err = fuzzOutputCLI(stats, w)
+		err = fuzzOutputCLI(name, stats, w)
 	}
 	if err != nil {
 		panic(err)
 	}
 }
 
-func fuzzOutputJSON(stats *Stats, w io.Writer) error {
+func fuzzOutputJSON(name string, stats *Stats, w io.Writer) error {
 	e := json.NewEncoder(w)
 	e.SetIndent("", "  ")
 	return e.Encode(stats)
 }
 
-func fuzzOutputCLI(stats *Stats, w io.Writer) error {
+func fuzzOutputCLI(name string, stats *Stats, w io.Writer) error {
 	var (
-		headingw   = 18
-		rowheadw   = 18
-		okerrw     = 8
+		headingw = 18
+		rowheadw = 18
+		okerrw   = 8
+
 		heading    = func(v interface{}) string { return colorwr(lightBlue, headingw, ' ', v) }
 		rowhead    = func(v interface{}) string { return colorwr(lightBlue, rowheadw, ' ', v) }
 		subheading = func(v interface{}) string { return color(darkGray, v) }

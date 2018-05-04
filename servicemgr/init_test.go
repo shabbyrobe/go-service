@@ -115,12 +115,11 @@ func newTestingFullListener(cap int) *testingFullListener {
 }
 
 var (
-	_ service.Listener        = &testingFullListener{}
-	_ Listener                = &testingFullListener{}
-	_ NonHaltingErrorListener = &testingFullListener{}
-	_ StateListener           = &testingFullListener{}
+	_ service.Listener      = &testingFullListener{}
+	_ service.ErrorListener = &testingFullListener{}
+	_ service.StateListener = &testingFullListener{}
 
-	_ Listener = &testingListener{}
+	_ service.Listener = &testingListener{}
 )
 
 type testingListener struct {
@@ -132,8 +131,6 @@ func newTestingListener(cap int) *testingListener {
 		ends: make(chan listenerErr, cap),
 	}
 }
-
-var _ Listener = &testingListener{}
 
 func (t *testingListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
 	select {
@@ -154,7 +151,7 @@ func newTestingNonHaltingErrorListener(cap int) *testingNonHaltingErrorListener 
 	}
 }
 
-var _ NonHaltingErrorListener = &testingNonHaltingErrorListener{}
+var _ service.ErrorListener = &testingNonHaltingErrorListener{}
 
 func (t *testingNonHaltingErrorListener) OnServiceError(service service.Service, err service.Error) {
 	select {
@@ -175,7 +172,7 @@ func newTestingStateListener(cap int) *testingStateListener {
 	}
 }
 
-var _ StateListener = &testingStateListener{}
+var _ service.StateListener = &testingStateListener{}
 
 func (t *testingStateListener) OnServiceState(service service.Service, state service.State) {
 	select {

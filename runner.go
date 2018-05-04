@@ -119,16 +119,23 @@ func MustEnsureHalt(r Runner, timeout time.Duration, s Service) {
 }
 
 type runner struct {
-	listener Listener
+	listener      Listener
+	errListener   ErrorListener
+	stateListener StateListener
 
 	states     map[Service]*runnerState
 	statesLock sync.RWMutex
 }
 
 func NewRunner(listener Listener) Runner {
+	el, _ := listener.(ErrorListener)
+	sl, _ := listener.(StateListener)
+
 	return &runner{
-		listener: listener,
-		states:   make(map[Service]*runnerState),
+		listener:      listener,
+		errListener:   el,
+		stateListener: sl,
+		states:        make(map[Service]*runnerState),
 	}
 }
 
@@ -332,15 +339,15 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 
 	rs.resetStarting(ready)
 
-	if r.listener != nil {
-		go r.listener.OnServiceState(service, Starting)
+	if r.stateListener != nil {
+		go r.stateListener.OnServiceState(service, Starting)
 	}
 	return nil
 }
 
 func (r *runner) OnError(service Service, err error) {
-	if r.listener != nil {
-		go r.listener.OnServiceError(service, WrapError(err, service))
+	if r.errListener != nil {
+		go r.errListener.OnServiceError(service, WrapError(err, service))
 	}
 }
 
@@ -364,10 +371,8 @@ func (r *runner) Ready(service Service) error {
 			return err
 		}
 	}
-	if serr != nil {
-		if r.listener != nil {
-			go r.listener.OnServiceState(service, Started)
-		}
+	if serr != nil && r.stateListener != nil {
+		go r.stateListener.OnServiceState(service, Started)
 	}
 	return nil
 }
@@ -382,8 +387,8 @@ func (r *runner) Halting(service Service) error {
 	if err := r.states[service].state.set(Halting); err != nil {
 		return err
 	}
-	if r.listener != nil {
-		go r.listener.OnServiceState(service, Halting)
+	if r.stateListener != nil {
+		go r.stateListener.OnServiceState(service, Halting)
 	}
 	return nil
 }
@@ -426,8 +431,8 @@ func (r *runner) shutdown(rs *runnerState, service Service) error {
 	if !rs.Retain() {
 		delete(r.states, service)
 	}
-	if r.listener != nil {
-		go r.listener.OnServiceState(service, Halted)
+	if r.stateListener != nil {
+		go r.stateListener.OnServiceState(service, Halted)
 	}
 	return nil
 }

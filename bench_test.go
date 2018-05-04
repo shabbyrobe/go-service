@@ -8,6 +8,14 @@ import (
 	"github.com/shabbyrobe/golib/assert"
 )
 
+func BenchmarkRunnerStart1(b *testing.B) {
+	benchmarkRunnerStartN(b, 1)
+}
+
+func BenchmarkGoroutineStart1(b *testing.B) {
+	benchmarkGoroutineStartN(b, 1)
+}
+
 func BenchmarkRunnerStart10(b *testing.B) {
 	benchmarkRunnerStartN(b, 10)
 }
@@ -17,9 +25,6 @@ func BenchmarkGoroutineStart10(b *testing.B) {
 }
 
 func benchmarkRunnerStartN(b *testing.B, n int) {
-	b.StopTimer()
-	b.ResetTimer()
-
 	tt := assert.WrapTB(b)
 	r := NewRunner(newDummyListener())
 
@@ -28,10 +33,11 @@ func benchmarkRunnerStartN(b *testing.B, n int) {
 		svcs[i] = (&blockingService{}).Init()
 	}
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
-		for i := 0; i < n; i++ {
-			_ = r.Start(svcs[i], nil)
+		for j := 0; j < n; j++ {
+			_ = r.Start(svcs[j], nil)
 		}
 		b.StopTimer()
 		tt.MustOK(r.HaltAll(1*time.Second, 0))

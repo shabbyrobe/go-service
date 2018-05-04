@@ -16,8 +16,10 @@ type Listener interface {
 	// Every call to Runner.Start or Runner.StartWait will cause a call to
 	// OnServiceEnd, regardless of the outcome of the call to Start/StartWait.
 	OnServiceEnd(stage Stage, service Service, err Error)
+}
 
-	// OnServiceError should be called when an error occurs in your running service
+type ErrorListener interface {
+	// OnServiceError is called when an error occurs in your running service
 	// that does not cause the service to End; the service MUST continue
 	// running after this error occurs.
 	//
@@ -29,6 +31,10 @@ type Listener interface {
 	// Errors should be wrapped using service.WrapError(err, yourSvc) so
 	// context information can be applied.
 	OnServiceError(service Service, err Error)
+}
 
+type StateListener interface {
+	// OnServiceState is called every time a service transitions from one state
+	// to another.
 	OnServiceState(service Service, state State)
 }

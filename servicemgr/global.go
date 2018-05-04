@@ -60,11 +60,11 @@ func State(s service.Service) service.State {
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartWaitListen(timeout time.Duration, l Listener, s service.Service) error {
+func StartWaitListen(timeout time.Duration, l service.Listener, s service.Service) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
-		l, _ = s.(Listener)
+		l, _ = s.(service.Listener)
 	}
 	if l != nil {
 		listener.Add(s, l)
@@ -84,11 +84,11 @@ func StartWait(timeout time.Duration, s service.Service) error {
 // Listeners can be used multiple times when starting different services.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func StartListen(l Listener, s service.Service, rdy service.ReadySignal) error {
+func StartListen(l service.Listener, s service.Service, rdy service.ReadySignal) error {
 	lock.RLock()
 	defer lock.RUnlock()
 	if l == nil {
-		l, _ = s.(Listener)
+		l, _ = s.(service.Listener)
 	}
 	if l != nil {
 		listener.Add(s, l)
@@ -203,7 +203,7 @@ type Starter struct {
 	service.Service
 }
 
-func (s Starter) StartWaitListen(timeout time.Duration, l Listener) error {
+func (s Starter) StartWaitListen(timeout time.Duration, l service.Listener) error {
 	svc := s.Service
 	s.Service = nil
 	return StartWaitListen(timeout, l, svc)
@@ -215,7 +215,7 @@ func (s Starter) StartWait(timeout time.Duration) error {
 	return StartWait(timeout, svc)
 }
 
-func (s Starter) StartListen(l Listener, rdy service.ReadySignal) error {
+func (s Starter) StartListen(l service.Listener, rdy service.ReadySignal) error {
 	svc := s.Service
 	s.Service = nil
 	return StartListen(l, svc, rdy)
