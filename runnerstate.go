@@ -80,12 +80,6 @@ func (r *runnerState) Calls() (starting, ready bool) {
 	return
 }
 
-func (r *runnerState) SetStartingCalled(v bool) {
-	r.lock.Lock()
-	r.startingCalled = v
-	r.lock.Unlock()
-}
-
 func (r *runnerState) Ready() {
 	r.lock.Lock()
 	r.readyCalled = true
