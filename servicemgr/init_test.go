@@ -17,8 +17,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if code == 0 {
-		// This little hack gives things like "go OnServiceState" a chance to
-		// finish - it routinely shows up in the profile
+		// See notes in service.TestMain
 		time.Sleep(20 * time.Millisecond)
 
 		after := pprof.Lookup("goroutine")

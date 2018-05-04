@@ -58,10 +58,11 @@ func TestRegisterUnregister(t *testing.T) {
 
 	l := newTestingFullListener(0)
 	tt.MustOK(Register(s1).StartWaitListen(10*tscale, l))
-	tt.MustEqual(1, len(getListener().listeners))
-	tt.MustEqual(1, len(getListener().listenersNHError))
-	tt.MustEqual(1, len(getListener().listenersState))
-	tt.MustEqual(1, len(getListener().retained))
+	stats := listenerStats()
+	tt.MustEqual(1, stats.listeners)
+	tt.MustEqual(1, stats.listenersNHError)
+	tt.MustEqual(1, stats.listenersState)
+	tt.MustEqual(1, stats.retained)
 
 	tt.MustEqual(1, len(Services(service.FindRegistered)))
 
@@ -73,10 +74,11 @@ func TestRegisterUnregister(t *testing.T) {
 	tt.MustEqual(0, len(Services(service.FindRegistered)))
 	tt.MustEqual(0, len(Services(service.FindUnregistered)))
 
-	tt.MustEqual(0, len(getListener().listeners))
-	tt.MustEqual(0, len(getListener().listenersNHError))
-	tt.MustEqual(0, len(getListener().listenersState))
-	tt.MustEqual(0, len(getListener().retained))
+	stats = listenerStats()
+	tt.MustEqual(0, stats.listeners)
+	tt.MustEqual(0, stats.listenersNHError)
+	tt.MustEqual(0, stats.listenersState)
+	tt.MustEqual(0, stats.retained)
 }
 
 func TestListenerEndsOnHalt(t *testing.T) {
@@ -88,7 +90,7 @@ func TestListenerEndsOnHalt(t *testing.T) {
 
 	l := newTestingListener(1)
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
-	tt.MustEqual(1, len(getListener().listeners))
+	tt.MustEqual(1, listenerStats().listeners)
 	tt.MustOK(Halt(dto, s1))
 	tt.MustAssert(State(s1) == service.Halted)
 
@@ -108,7 +110,7 @@ func TestListenerShared(t *testing.T) {
 	l := newTestingFullListener(2)
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
 	tt.MustOK(StartWaitListen(10*tscale, l, s2))
-	tt.MustEqual(2, len(getListener().listeners))
+	tt.MustEqual(2, listenerStats().listeners)
 
 	tt.MustOK(Shutdown(dto))
 	tt.MustAssert(State(s1) == service.Halted)
@@ -133,7 +135,7 @@ func TestListenerServices(t *testing.T) {
 
 	tt.MustOK(StartWait(10*tscale, s1))
 	tt.MustOK(StartWait(10*tscale, s2))
-	tt.MustEqual(0, len(getListener().listeners))
+	tt.MustEqual(0, listenerStats().listeners)
 
 	tt.MustEqual([]service.Service{s1, s2}, Services(service.AnyState))
 
@@ -153,13 +155,13 @@ func TestListenerUnregisteredServiceDoesNotLeakMemory(t *testing.T) {
 
 	l := newTestingFullListener(1)
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
-	tt.MustEqual(1, len(getListener().listeners))
+	tt.MustEqual(1, listenerStats().listeners)
 
 	tt.MustEqual([]service.Service{s1}, Services(service.AnyState))
 
 	tt.MustOK(Shutdown(dto))
 	tt.MustAssert(State(s1) == service.Halted)
-	tt.MustEqual(0, listenerCnt())
+	tt.MustEqual(0, listenerStats().count)
 	tt.MustEqual([]service.Service{}, Services(service.AnyState))
 }
 
@@ -172,12 +174,12 @@ func TestListenerUnregisterRunningService(t *testing.T) {
 
 	l := newTestingFullListener(1)
 
-	tt.MustEqual(0, len(getListener().retained))
+	tt.MustEqual(0, listenerStats().retained)
 	tt.MustOK(Register(s1))
-	tt.MustEqual(1, len(getListener().retained))
+	tt.MustEqual(1, listenerStats().retained)
 
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
-	tt.MustEqual(1, len(getListener().listeners))
+	tt.MustEqual(1, listenerStats().listeners)
 
 	tt.MustEqual([]service.Service{s1}, Services(service.AnyState))
 	deferred, err := Unregister(s1)
@@ -186,7 +188,11 @@ func TestListenerUnregisterRunningService(t *testing.T) {
 
 	tt.MustOK(Shutdown(dto))
 	tt.MustAssert(State(s1) == service.Halted)
-	tt.MustEqual(0, listenerCnt())
+
+	// FIXME: this fails periodically because the listener is called in a
+	// goroutine. we need the endWaiter from the listenerCollector in the
+	// service package in here.
+	tt.MustEqual(0, listenerStats().count)
 	tt.MustEqual([]service.Service{}, Services(service.AnyState))
 }
 
@@ -199,19 +205,20 @@ func TestListenerUnregisterHaltedService(t *testing.T) {
 
 	l := newTestingFullListener(1)
 
-	tt.MustEqual(0, len(getListener().retained))
+	tt.MustEqual(0, listenerStats().retained)
 	tt.MustOK(Register(s1))
-	tt.MustEqual(1, len(getListener().retained))
+	tt.MustEqual(1, listenerStats().retained)
 
 	tt.MustOK(StartWaitListen(10*tscale, l, s1))
-	tt.MustEqual(1, len(getListener().retained))
-	tt.MustEqual(1, listenerCnt())
+	tt.MustEqual(1, listenerStats().retained)
+	tt.MustEqual(1, listenerStats().count)
 
 	tt.MustEqual([]service.Service{s1}, Services(service.AnyState))
 	tt.MustOK(Halt(dto, s1))
 
-	tt.MustEqual(1, len(getListener().retained))
-	tt.MustEqual(1, listenerCnt())
+	stats := listenerStats()
+	tt.MustEqual(1, stats.retained)
+	tt.MustEqual(1, stats.count)
 
 	deferred, err := Unregister(s1)
 	tt.MustOK(err)
@@ -219,24 +226,37 @@ func TestListenerUnregisterHaltedService(t *testing.T) {
 	tt.MustAssert(State(s1) == service.Halted)
 	tt.MustEqual([]service.Service{}, Services(service.AnyState))
 
-	tt.MustEqual(0, len(getListener().retained))
-	tt.MustEqual(0, listenerCnt())
+	stats = listenerStats()
+	tt.MustEqual(0, stats.retained)
+	tt.MustEqual(0, stats.count)
 }
 
-func listenerCnt() int {
+func listenerStats() (stats struct {
+	count            int
+	listeners        int
+	listenersNHError int
+	listenersState   int
+	retained         int
+}) {
 	l := getListener()
-	max := 0
-	if ll := len(l.listeners); ll > max {
-		max = ll
+	l.lock.Lock()
+	stats.listeners = len(l.listeners)
+	stats.listenersNHError = len(l.listenersNHError)
+	stats.listenersState = len(l.listenersState)
+	stats.retained = len(l.retained)
+
+	if stats.listeners > stats.count {
+		stats.count = stats.listeners
 	}
-	if ll := len(l.retained); ll > max {
-		max = ll
+	if stats.listenersNHError > stats.count {
+		stats.count = stats.listenersNHError
 	}
-	if ll := len(l.listenersNHError); ll > max {
-		max = ll
+	if stats.listenersState > stats.count {
+		stats.count = stats.listenersState
 	}
-	if ll := len(l.listenersState); ll > max {
-		max = ll
+	if stats.retained > stats.count {
+		stats.count = stats.retained
 	}
-	return max
+	l.lock.Unlock()
+	return
 }
