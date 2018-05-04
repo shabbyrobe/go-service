@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -76,32 +75,6 @@ type Runner interface {
 	Unregister(s Service) (deferred bool, err error)
 }
 
-// Listener allows you to respond to events raised by the Runner in the
-// code that owns the Runner, like premature service failure.
-//
-// Listeners should not be shared between Runners.
-//
-type Listener interface {
-	// OnServiceError should be called when an error occurs in your running service
-	// that does not cause the service to End; the service MUST continue
-	// running after this error occurs.
-	//
-	// This is basically where you send errors that don't have an immediately
-	// obvious method of handling, that don't terminate the service, but you
-	// don't want to swallow entirely. Essentially it defers the decision for
-	// what to do about the error to the parent context.
-	//
-	// Errors should be wrapped using service.WrapError(err, yourSvc) so
-	// context information can be applied.
-	OnServiceError(service Service, err Error)
-
-	// OnServiceEnd is called when your service ends. If the service responded
-	// because it was Halted, err will be nil, otherwise err MUST be set.
-	OnServiceEnd(stage Stage, service Service, err Error)
-
-	OnServiceState(service Service, state State)
-}
-
 type Stage int
 
 const (
@@ -145,38 +118,6 @@ func MustEnsureHalt(r Runner, timeout time.Duration, s Service) {
 	}
 }
 
-type runnerState struct {
-	state          State
-	startingCalled int32
-	readyCalled    int32
-	retain         bool
-	ready          ReadySignal
-	done           chan struct{}
-	halted         chan struct{}
-}
-
-func (r *runnerState) StartingCalled() bool { return atomic.LoadInt32(&r.startingCalled) == 1 }
-func (r *runnerState) SetStartingCalled(v bool) {
-	var vi int32
-	if v {
-		vi = 1
-	}
-	atomic.StoreInt32(&r.startingCalled, vi)
-}
-
-func (r *runnerState) ReadyCalled() bool { return atomic.LoadInt32(&r.readyCalled) == 1 }
-func (r *runnerState) SetReadyCalled(v bool) {
-	var vi int32
-	if v {
-		vi = 1
-	}
-	atomic.StoreInt32(&r.readyCalled, vi)
-}
-
-func (r *runnerState) State() State {
-	return r.state
-}
-
 type runner struct {
 	listener Listener
 
@@ -197,7 +138,8 @@ func (r *runner) Services(query StateQuery) []Service {
 
 	out := make([]Service, 0, len(r.states))
 	for service, rs := range r.states {
-		if query.Match(rs.State(), rs.retain) {
+		state, retain := rs.AllState()
+		if query.Match(state, retain) {
 			out = append(out, service)
 		}
 	}
@@ -228,21 +170,27 @@ func (r *runner) Start(service Service, ready ReadySignal) (err error) {
 	ctx := newSvcContext(service, r.Ready, r.OnError, rs.done)
 
 	go func() {
-		// Careful! stateLock is not locked in here. Anything you touch in
-		// the runnerState must take care to synchronise.
+		// Careful! Anything you touch in the runnerState in here must take
+		// care to synchronise.
 
 		err := service.Run(ctx)
-		startingCalled, readyCalled := rs.StartingCalled(), rs.ReadyCalled()
+
+		// By the time we hit this point, the service should no longer be
+		// running at all if it was started. A badly coded service may have
+		// stray goroutines blocking on ctx.Done(), but if they are waiting
+		// at a call to '<-ctx.Done()', they will be waiting on the old
+		// channel, which should be closed when ended() calls shutdown().
+		startingCalled, readyCalled := rs.Calls()
 		wasStarted := err != nil
 
-		ready := rs.ready
+		ready := rs.ReadySignal()
 		if wasStarted {
 			if rerr := r.ended(service); rerr != nil {
 				panic(rerr)
 			}
 		}
 
-		close(rs.halted)
+		rs.Halted()
 
 		stage := StageRun
 		if !readyCalled {
@@ -296,7 +244,7 @@ func (r *runner) Halt(timeout time.Duration, service Service) error {
 	if rs == nil {
 		panic("runnerState should not be nil!")
 	}
-	close(rs.done)
+	rs.Done()
 
 	after := time.After(timeout)
 	select {
@@ -344,7 +292,7 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 		}
 
 		rs := r.runnerState(service)
-		close(rs.done)
+		rs.Done()
 
 		after := time.After(timeout)
 		select {
@@ -376,19 +324,13 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 	if rs == nil {
 		rs = newRunnerState()
 		r.states[service] = rs
-	} else {
-		rs.SetReadyCalled(false)
-		rs.SetStartingCalled(false)
 	}
 
 	if err := rs.state.set(Starting); err != nil {
 		return err
 	}
 
-	rs.SetStartingCalled(true)
-	rs.ready = ready
-	rs.done = make(chan struct{})
-	rs.halted = make(chan struct{})
+	rs.resetStarting(ready)
 
 	if r.listener != nil {
 		go r.listener.OnServiceState(service, Starting)
@@ -398,7 +340,7 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 
 func (r *runner) OnError(service Service, err error) {
 	if r.listener != nil {
-		r.listener.OnServiceError(service, WrapError(err, service))
+		go r.listener.OnServiceError(service, WrapError(err, service))
 	}
 }
 
@@ -410,10 +352,7 @@ func (r *runner) Ready(service Service) error {
 	}
 
 	rs := r.states[service]
-	rs.SetReadyCalled(true)
-	if rs.ready != nil {
-		rs.ready.Done(nil)
-	}
+	rs.Ready()
 
 	var serr *errState
 	if err := rs.state.set(Started); err != nil {
@@ -474,7 +413,7 @@ func (r *runner) ended(service Service) error {
 		return err
 	}
 
-	close(rs.done)
+	rs.Done()
 
 	return r.shutdown(rs, service)
 }
@@ -484,7 +423,7 @@ func (r *runner) shutdown(rs *runnerState, service Service) error {
 	if err := rs.state.set(Halted); err != nil {
 		return err
 	}
-	if !rs.retain {
+	if !rs.Retain() {
 		delete(r.states, service)
 	}
 	if r.listener != nil {
@@ -502,7 +441,7 @@ func (r *runner) Register(service Service) Runner {
 		rs = newRunnerState()
 		r.states[service] = rs
 	}
-	rs.retain = true
+	rs.SetRetain(true)
 	return r
 }
 
@@ -519,15 +458,9 @@ func (r *runner) Unregister(service Service) (deferred bool, rerr error) {
 	deferred = state != Halted
 
 	if deferred {
-		rs.retain = false
+		rs.SetRetain(false)
 	} else {
 		delete(r.states, service)
 	}
 	return deferred, nil
-}
-
-func newRunnerState() *runnerState {
-	return &runnerState{
-		state: Halted,
-	}
 }

@@ -7,11 +7,13 @@ import (
 // State should not be used as a flag by external consumers of this package.
 const (
 	NoState State = 0
-	Halted  State = 1 << iota
+	Halting State = 1 << iota
+	Halted
 	Starting
 	Started
-	Halting
 )
+
+var States = []State{Halting, Halted, Starting, Started}
 
 type State int
 
