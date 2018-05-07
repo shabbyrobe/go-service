@@ -8,7 +8,7 @@ import (
 
 // Runner Starts, Halts and manages Services.
 type Runner interface {
-	State(s Service) State
+	State(svc Service) State
 
 	// StartWait calls a Service's Run() method in a goroutine. It waits until
 	// the service calls Context.Ready() before returning. It is a shorthand for
@@ -22,7 +22,7 @@ type Runner interface {
 	// using service.IsErrTimeout(). If StartWait times out and you do not have a
 	// mechanism to recover and kill the Service, you MUST panic.
 	//
-	StartWait(timeout time.Duration, s Service) error
+	StartWait(timeout time.Duration, svc Service) error
 
 	// Start a service in this runner.
 	//
@@ -37,13 +37,13 @@ type Runner interface {
 	//
 	// ReadySignal may be nil.
 	//
-	Start(Service, ReadySignal) error
+	Start(svc Service, ready ReadySignal) error
 
 	// Halt a service started in this runner. The runner will retain a
 	// reference to it until Unregister is called.
 	//
 	// Timeout must be > 0.
-	Halt(timeout time.Duration, s Service) error
+	Halt(timeout time.Duration, svc Service) error
 
 	// HaltAll halts all services started in this runner. The runner will retain
 	// references to the services until Unregister is called.
@@ -60,19 +60,22 @@ type Runner interface {
 	// Services returns a list of services currently registered or running at
 	// the time of the call. If State is provided, only services matching the
 	// state are returned.
-	Services(state StateQuery) []Service
+	//
+	// Pass limit to restrict the number of returned results. If limit is <= 0,
+	// all matching services are returned.
+	Services(state StateQuery, limit int) []Service
 
 	// Register instructs the runner to retain the service after it has ended.
 	// Services that are not registered are not retained.
 	// Register must return the runner upon which it was called.
-	Register(s Service) Runner
+	Register(svc Service) Runner
 
 	// Unregister unregisters a service that has been registered in this runner.
 	// If the service is running, it will not be unregistered immediately, but will
 	// be Unregistered when it stops, either by halting or by erroring.
 	//
 	// If the unregister was deferred, this will be returned in the first return arg.
-	Unregister(s Service) (deferred bool, err error)
+	Unregister(svc Service) (deferred bool, err error)
 }
 
 type Stage int
@@ -139,17 +142,30 @@ func NewRunner(listener Listener) Runner {
 	}
 }
 
-func (r *runner) Services(query StateQuery) []Service {
+func (r *runner) Services(query StateQuery, limit int) []Service {
 	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
 
-	out := make([]Service, 0, len(r.states))
+	if limit <= 0 {
+		limit = len(r.states)
+	}
+
+	// FIXME: possibly allocates way too much for the general case when
+	// limit is not passed.
+	out := make([]Service, 0, limit)
+
+	n := 0
 	for service, rs := range r.states {
 		state, retain := rs.AllState()
 		if query.Match(state, retain) {
 			out = append(out, service)
+			n++
+			if n >= limit {
+				break
+			}
 		}
 	}
+
+	r.statesLock.Unlock()
 
 	return out
 }
@@ -271,7 +287,7 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 		return 0, fmt.Errorf("service: halt timeout must be > 0")
 	}
 
-	services := r.Services(AnyState)
+	services := r.Services(AnyState, 0)
 
 	var errors []error
 

@@ -37,36 +37,11 @@ func NewGroup(name Name, services ...Service) *Group {
 	}
 }
 
-type groupListener struct {
-	errs chan Error
-	ends chan Error
-	done <-chan struct{}
+func NewGroupWithRunnerBuilder(name Name, builder func(l Listener) Runner, services ...Service) *Group {
+	g := NewGroup(name, services...)
+	g.runnerBuilder = builder
+	return g
 }
-
-func newGroupListener(sz int) *groupListener {
-	return &groupListener{
-		errs: make(chan Error),
-		ends: make(chan Error, sz),
-	}
-}
-
-func (l *groupListener) OnServiceError(service Service, err Error) {
-	select {
-	case l.errs <- err:
-	case <-l.done:
-	}
-}
-
-func (l *groupListener) OnServiceEnd(stage Stage, service Service, err Error) {
-	if stage == StageRun {
-		select {
-		case l.ends <- err:
-		case <-l.done:
-		}
-	}
-}
-
-func (l *groupListener) OnServiceState(service Service, state State) {}
 
 func (g *Group) ServiceName() Name { return g.name }
 
@@ -117,6 +92,37 @@ done:
 		return &errGroupHalt{name: g.ServiceName(), haltError: herr, cause: err}
 	}
 }
+
+type groupListener struct {
+	errs chan Error
+	ends chan Error
+	done <-chan struct{}
+}
+
+func newGroupListener(sz int) *groupListener {
+	return &groupListener{
+		errs: make(chan Error),
+		ends: make(chan Error, sz),
+	}
+}
+
+func (l *groupListener) OnServiceError(service Service, err Error) {
+	select {
+	case l.errs <- err:
+	case <-l.done:
+	}
+}
+
+func (l *groupListener) OnServiceEnd(stage Stage, service Service, err Error) {
+	if stage == StageRun {
+		select {
+		case l.ends <- err:
+		case <-l.done:
+		}
+	}
+}
+
+func (l *groupListener) OnServiceState(service Service, state State) {}
 
 func IsErrGroupHalt(err error) bool {
 	_, ok := err.(*errGroupHalt)

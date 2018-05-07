@@ -38,3 +38,9 @@ type StateListener interface {
 	// to another.
 	OnServiceState(service Service, state State)
 }
+
+type ListenerFull interface {
+	Listener
+	ErrorListener
+	StateListener
+}

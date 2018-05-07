@@ -103,11 +103,11 @@ func Start(s service.Service, rdy service.ReadySignal) error {
 // Services lists services in the global runner based on the criteria.
 //
 // See github.com/shabbyrobe/go-service.Runner for more documentation.
-func Services(state service.StateQuery) []service.Service {
+func Services(state service.StateQuery, limit int) []service.Service {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return runner.Services(state)
+	return runner.Services(state, limit)
 }
 
 // Register registers a service from the global runner.
@@ -171,11 +171,11 @@ func MustEnsureHaltMany(timeout time.Duration, ss ...service.Service) {
 }
 
 func Shutdown(timeout time.Duration) (n int, err error) {
-	return EnsureHaltMany(timeout, Runner().Services(service.FindRunning)...)
+	return EnsureHaltMany(timeout, Runner().Services(service.FindRunning, 0)...)
 }
 
 func MustShutdown(timeout time.Duration) {
-	MustEnsureHaltMany(timeout, Runner().Services(service.FindRunning)...)
+	MustEnsureHaltMany(timeout, Runner().Services(service.FindRunning, 0)...)
 }
 
 func DeferEnsureHalt(into *error, timeout time.Duration, service service.Service) {

@@ -113,46 +113,52 @@ func main() {
 Testing
 -------
 
-If the tester detects any additional goroutines that have not been closed after 
+On first glance it might look like there are not a lot of tests in here, but
+look in the servicetest subpackage; there's an absolute truckload in there.
+
+The test runner is a little bit on the messy side at the moment but it does
+work:
+
+    go run test.go [-cover=<file>] -- [options]
+
+`test.go` handles calling `go test` for each package with the required
+arguments. `[options]` get passed to the child invocations of `go test` if they
+are applicable.
+
+If you pass the `-cover*` arguments after the `--`, the reports won't be
+merged. If you pass it to `go run test.go` before the `--`, they will be.
+
+If the tester detects any additional goroutines that have not been closed after
 the tests have succeeded, the stack traces for those goroutines will be dumped
 and the tester will respond with an error code. This may cause issues on other
 platforms but it works on OS X and Ubuntu.
 
-The test suite for the `service` package includes a fuzz tester, disabled by
-default. To enable it, pass `-service.fuzz=true` to `go test`, along with one
-of the following options:
-
-```
-  -service.fuzzticknsec int
-    	How frequently to tick in the fuzzer's loop.
-  -service.fuzzseed int
-        Randomise the fuzz tester with this seed prior to every fuzz test
-  -service.fuzztime float
-    	Run the fuzzer for this many seconds (default 1)
-```
+The test suite in the `servicetest` package includes a fuzz tester, disabled by
+default. To enable it, pass `-service.fuzz=true` to `go run test.go` after the
+`--`.
 
 When using the fuzz tester, it is a good idea to pass `-v` as well.
 
 This will fuzz for 10 minutes and print the results:
 
-    go test -v -service.fuzz=true -service.fuzztime=600
+    go run test.go -- -v -service.fuzz=true -service.fuzztime=600
 
 This will fuzz for 10 seconds, but will only make a randomised decision every
-10ms (this is useful to get more contained tests with fewer things happening
-to try to reproduce errors):
+10ms (this is useful to get more contained tests with fewer things happening to
+try to reproduce errors):
 
-    go test -v -service.fuzz=true -service.fuzztime=10 -service.fuzzticknsec=10000000
+    go run test.go -- -v -service.fuzz=true -service.fuzztime=10 -service.fuzzticknsec=10000000
 
 Seed the fuzzer with a particular value:
 
-    go test -v -service.fuzz=true -service.fuzztime=10 -service.fuzzseed=12345
+    go run test.go -- -v -service.fuzz=true -service.fuzztime=10 -service.fuzzseed=12345
 
 You should also run the fuzzer with the race detector turned on as well as with
 it off. This can help flush out different bugs:
 
-    go test -race -v -service.fuzz=true -service.fuzztime=10
+    go run test.go -- -race -v -service.fuzz=true -service.fuzztime=10
 
 See how much coverage we get out of the fuzzer alone:
 
-    go test -run=TestRunnerFuzz -service.fuzz=true -service.fuzztime=10 -v -coverprofile=cover.out 
+    go run test.go -cover=cover.out -- -run=TestRunnerFuzz -service.fuzz=true -service.fuzztime=10 -v
 

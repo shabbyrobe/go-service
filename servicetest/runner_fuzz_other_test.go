@@ -1,6 +1,6 @@
 // +build !linux
 
-package service
+package servicetest
 
 import "time"
 

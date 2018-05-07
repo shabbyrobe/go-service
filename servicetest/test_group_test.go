@@ -1,12 +1,19 @@
-package service
+package servicetest
 
 import (
 	"errors"
 	"fmt"
 	"testing"
 
+	service "github.com/shabbyrobe/go-service"
 	"github.com/shabbyrobe/golib/assert"
 )
+
+type statService interface {
+	ServiceName() service.Name
+	Starts() int
+	Halts() int
+}
 
 func assertStartHaltCount(tt assert.T, scnt, hcnt int, ss ...statService) {
 	tt.Helper()
@@ -19,94 +26,94 @@ func assertStartHaltCount(tt assert.T, scnt, hcnt int, ss ...statService) {
 func TestGroup(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	s1 := (&blockingService{}).Init()
-	s2 := (&blockingService{}).Init()
-	r := NewRunner(newDummyListener())
-	g := NewGroup("yep", s1, s2)
+	s1 := (&BlockingService{}).Init()
+	s2 := (&BlockingService{}).Init()
+	r := service.NewRunner(NewNullListener())
+	g := service.NewGroup("yep", s1, s2)
 
 	tt.MustOK(r.StartWait(dto, g))
 	tt.MustOK(r.Halt(dto, g))
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupEndOne(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	s1 := (&blockingService{}).Init()
-	s2 := (&blockingService{}).Init()
-	s3 := &dummyService{runTime: 2 * tscale}
+	s1 := (&BlockingService{}).Init()
+	s2 := (&BlockingService{}).Init()
+	s3 := (&TimedService{RunTime: 2 * tscale}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustOK(r.StartWait(dto, g))
-	defer MustEnsureHalt(r, dto, g)
+	defer service.MustEnsureHalt(r, dto, g)
 	mustRecv(tt, ew, dto)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
 	tt.MustEqual(1, len(lc.ends(g)))
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupOneFailsBeforeReady(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	e1 := errors.New("boom")
-	s1 := (&blockingService{startDelay: tscale}).Init()
-	s2 := (&blockingService{startDelay: tscale}).Init()
-	s3 := &dummyService{startFailure: e1} // should end immediately
+	s1 := (&BlockingService{StartDelay: tscale}).Init()
+	s2 := (&BlockingService{StartDelay: tscale}).Init()
+	s3 := (&TimedService{StartFailure: e1}).Init() // should end immediately
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
-	defer MustEnsureHalt(r, dto, g)
+	defer service.MustEnsureHalt(r, dto, g)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 1, 0, s3)
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupOneFailsAfterReady(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	e1 := errors.New("boom")
-	s1 := (&blockingService{startDelay: tscale}).Init()
-	s2 := (&blockingService{startDelay: tscale}).Init()
-	s3 := &dummyService{runFailure: e1} // should end immediately
+	s1 := (&BlockingService{StartDelay: tscale}).Init()
+	s2 := (&BlockingService{StartDelay: tscale}).Init()
+	s3 := (&TimedService{RunFailure: e1}).Init() // should end immediately
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustOK(r.StartWait(dto, g))
-	defer MustEnsureHalt(r, dto, g)
+	defer service.MustEnsureHalt(r, dto, g)
 	mustRecv(tt, ew, dto)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
 	tt.MustEqual(1, len(lc.ends(g)))
-	tt.MustEqual(e1, lc.ends(g)[0].err)
+	tt.MustEqual(e1, lc.ends(g)[0].Err)
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupEndMultiple(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	s1 := (&blockingService{}).Init()
-	s2 := &dummyService{runTime: 2 * tscale}
-	s3 := &dummyService{runTime: 2 * tscale}
+	s1 := (&BlockingService{}).Init()
+	s2 := (&TimedService{RunTime: 2 * tscale}).Init()
+	s3 := (&TimedService{RunTime: 2 * tscale}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustOK(r.StartWait(dto, g))
@@ -115,19 +122,19 @@ func TestGroupEndMultiple(t *testing.T) {
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
 	tt.MustEqual(1, len(lc.ends(g)))
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupEndAll(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	s1 := &dummyService{runTime: 2 * tscale}
-	s2 := &dummyService{runTime: 2 * tscale}
-	s3 := &dummyService{runTime: 2 * tscale}
+	s1 := (&TimedService{RunTime: 2 * tscale}).Init()
+	s2 := (&TimedService{RunTime: 2 * tscale}).Init()
+	s3 := (&TimedService{RunTime: 2 * tscale}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustOK(r.StartWait(dto, g))
@@ -136,18 +143,18 @@ func TestGroupEndAll(t *testing.T) {
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
 	tt.MustEqual(1, len(lc.ends(g)))
 
-	tt.MustOK(EnsureHalt(r, dto, g))
+	tt.MustOK(service.EnsureHalt(r, dto, g))
 }
 
 func TestGroupRunTwice(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	s1 := (&blockingService{}).Init()
-	s2 := (&blockingService{}).Init()
+	s1 := (&BlockingService{}).Init()
+	s2 := (&BlockingService{}).Init()
 
-	r1 := NewRunner(newDummyListener())
-	r2 := NewRunner(newDummyListener())
-	g := NewGroup("yep", s1, s2)
+	r1 := service.NewRunner(NewNullListener())
+	r2 := service.NewRunner(NewNullListener())
+	g := service.NewGroup("yep", s1, s2)
 
 	tt.MustOK(r1.StartWait(dto, g))
 	tt.MustOK(r2.StartWait(dto, g))
@@ -162,13 +169,13 @@ func TestGroupStartError(t *testing.T) {
 
 	e1 := errors.New("start failure")
 
-	s1 := (&blockingService{}).Init()
-	s2 := (&blockingService{}).Init()
-	s3 := &dummyService{startFailure: e1}
+	s1 := (&BlockingService{}).Init()
+	s2 := (&BlockingService{}).Init()
+	s3 := (&TimedService{StartFailure: e1}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
@@ -179,7 +186,7 @@ func TestGroupStartError(t *testing.T) {
 	// The start error should be passed to the failer
 	mustRecv(tt, ew, dto)
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupStartMultipleErrors(t *testing.T) {
@@ -188,13 +195,13 @@ func TestGroupStartMultipleErrors(t *testing.T) {
 	e1 := errors.New("start failure 1")
 	e2 := errors.New("start failure 2")
 
-	s1 := (&blockingService{}).Init()
-	s2 := &dummyService{startFailure: e1}
-	s3 := &dummyService{startFailure: e2}
+	s1 := (&BlockingService{}).Init()
+	s2 := (&TimedService{StartFailure: e1}).Init()
+	s3 := (&TimedService{StartFailure: e2}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	expErr := []error{e1, e2}
@@ -206,9 +213,9 @@ func TestGroupStartMultipleErrors(t *testing.T) {
 
 	// The start error should be passed to the failer
 	mustRecv(tt, ew, dto)
-	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: foundErr}}, lc.ends(g))
+	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageReady, Err: foundErr}}, lc.ends(g))
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupRunnerErrorWithFailingStart(t *testing.T) {
@@ -216,21 +223,21 @@ func TestGroupRunnerErrorWithFailingStart(t *testing.T) {
 
 	e1 := errors.New("start failure")
 
-	s1 := (&blockingService{}).Init()
-	s2 := (&blockingService{}).Init()
-	s3 := (&blockingService{}).Init()
+	s1 := (&BlockingService{}).Init()
+	s2 := (&BlockingService{}).Init()
+	s3 := (&BlockingService{}).Init()
 
-	lc := newListenerCollector()
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2, s3)
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc)
 
-	g.runnerBuilder = func(l Listener) Runner {
+	runnerBuilder := func(l service.Listener) service.Runner {
 		return &runnerWithFailingStart{
 			failAfter: 2,
 			err:       e1,
-			Runner:    NewRunner(l),
+			Runner:    service.NewRunner(l),
 		}
 	}
+	g := service.NewGroupWithRunnerBuilder("yep", runnerBuilder, s1, s2, s3)
 
 	ew := lc.endWaiter(g)
 	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
@@ -240,9 +247,9 @@ func TestGroupRunnerErrorWithFailingStart(t *testing.T) {
 
 	// The start error should be passed to the failer
 	mustRecv(tt, ew, dto)
-	tt.MustEqual([]listenerCollectorEnd{{stage: StageReady, err: e1}}, lc.ends(g))
+	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageReady, Err: e1}}, lc.ends(g))
 
-	tt.MustEqual(Halted, r.State(g))
+	tt.MustEqual(service.Halted, r.State(g))
 }
 
 func TestGroupOnError(t *testing.T) {
@@ -250,8 +257,8 @@ func TestGroupOnError(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := (&errorService{}).Init()
-	s2 := (&errorService{}).Init()
+	s1 := (&ErrorService{}).Init()
+	s2 := (&ErrorService{}).Init()
 
 	expected := 3 // at least this many errors should occur
 
@@ -262,10 +269,10 @@ func TestGroupOnError(t *testing.T) {
 		}
 	}()
 
-	lc := newListenerCollector()
+	lc := NewListenerCollector()
 
-	r := NewRunner(lc)
-	g := NewGroup("yep", s1, s2)
+	r := service.NewRunner(lc)
+	g := service.NewGroup("yep", s1, s2)
 	ew := lc.errWaiter(g, expected)
 
 	tt.MustOK(r.StartWait(tscale*10, g))

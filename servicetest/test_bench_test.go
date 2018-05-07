@@ -1,10 +1,11 @@
-package service
+package servicetest
 
 import (
 	"sync"
 	"testing"
 	"time"
 
+	service "github.com/shabbyrobe/go-service"
 	"github.com/shabbyrobe/golib/assert"
 )
 
@@ -26,11 +27,11 @@ func BenchmarkGoroutineStart10(b *testing.B) {
 
 func benchmarkRunnerStartN(b *testing.B, n int) {
 	tt := assert.WrapTB(b)
-	r := NewRunner(newDummyListener())
+	r := service.NewRunner(NewNullListener())
 
-	svcs := make([]Service, n)
+	svcs := make([]service.Service, n)
 	for i := 0; i < n; i++ {
-		svcs[i] = (&blockingService{}).Init()
+		svcs[i] = (&BlockingService{}).Init()
 	}
 
 	b.ResetTimer()
