@@ -13,8 +13,8 @@ type Listener interface {
 	// OnServiceEnd is called when your service ends. If the service responded
 	// because it was Halted, err will be nil, otherwise err MUST be set.
 	//
-	// Every call to Runner.Start or Runner.StartWait will cause a call to
-	// OnServiceEnd, regardless of the outcome of the call to Start/StartWait.
+	// Every call to Runner.Start will cause a call to OnServiceEnd, regardless
+	// of the outcome of the call to Start.
 	OnServiceEnd(stage Stage, service Service, err Error)
 }
 
@@ -36,7 +36,7 @@ type ErrorListener interface {
 type StateListener interface {
 	// OnServiceState is called every time a service transitions from one state
 	// to another.
-	OnServiceState(service Service, state State)
+	OnServiceState(service Service, from, to State)
 }
 
 type ListenerFull interface {

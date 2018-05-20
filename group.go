@@ -79,7 +79,7 @@ func (g *Group) Run(ctx Context) error {
 	for _, s := range g.services {
 		_ = runner.Register(s)
 		if err = runner.Start(s, ready); err != nil {
-			if _, herr := runner.HaltAll(g.haltTimeout, 0); herr != nil {
+			if _, herr := runner.Shutdown(g.haltTimeout, 0); herr != nil {
 				return &errGroupHalt{name: g.ServiceName(), haltError: herr, cause: err}
 			}
 			goto done
@@ -105,7 +105,7 @@ func (g *Group) Run(ctx Context) error {
 	}
 
 done:
-	_, herr := runner.HaltAll(g.haltTimeout, 0)
+	_, herr := runner.Shutdown(g.haltTimeout, 0)
 	if herr == nil {
 		return err
 	} else if err == nil {
@@ -120,6 +120,8 @@ type groupListener struct {
 	ends chan Error
 	done <-chan struct{}
 }
+
+var _ ListenerFull = &groupListener{}
 
 func newGroupListener(sz int) *groupListener {
 	return &groupListener{
@@ -144,7 +146,7 @@ func (l *groupListener) OnServiceEnd(stage Stage, service Service, err Error) {
 	}
 }
 
-func (l *groupListener) OnServiceState(service Service, state State) {}
+func (l *groupListener) OnServiceState(service Service, from, to State) {}
 
 func IsErrGroupHalt(err error) bool {
 	_, ok := err.(*errGroupHalt)

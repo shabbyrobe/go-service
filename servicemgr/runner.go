@@ -71,9 +71,9 @@ func (m *manager) Halt(timeout time.Duration, svc service.Service) error {
 	return nil
 }
 
-// HaltAll is not supported
-func (m *manager) HaltAll(timeout time.Duration, errlimit int) (n int, err error) {
-	// It's too hard to manage the shared listener and still support HaltAll for now.
+// Shutdown is not supported
+func (m *manager) Shutdown(timeout time.Duration, errlimit int) (n int, err error) {
+	// It's too hard to manage the shared listener and still support Shutdown for now.
 	// global Shutdown is the way to do this.
 	return 0, fmt.Errorf("not supported")
 }

@@ -106,7 +106,7 @@ func (g *listenerDispatcher) OnServiceError(svc service.Service, err service.Err
 	}
 }
 
-func (g *listenerDispatcher) OnServiceState(service service.Service, state service.State) {
+func (g *listenerDispatcher) OnServiceState(service service.Service, from, to service.State) {
 	g.lock.Lock()
 	l, ok := g.listenersState[service]
 	if !ok {
@@ -114,6 +114,6 @@ func (g *listenerDispatcher) OnServiceState(service service.Service, state servi
 	}
 	g.lock.Unlock()
 	if l != nil {
-		l.OnServiceState(service, state)
+		l.OnServiceState(service, from, to)
 	}
 }

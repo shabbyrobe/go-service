@@ -20,7 +20,6 @@ type State int
 func (s State) IsRunning() bool { return s == Starting || s == Started }
 
 func (s State) String() string {
-
 	switch s {
 	case Halted:
 		return "halted"

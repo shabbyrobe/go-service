@@ -25,7 +25,7 @@ func TestHTTP(t *testing.T) {
 
 	ender := servicemgr.NewEndListener(1)
 	runner := service.NewRunner(ender)
-	defer runner.HaltAll(1*time.Second, 0)
+	defer runner.Shutdown(1*time.Second, 0)
 	tt.MustOK(runner.StartWait(1*time.Second, h))
 
 	hc, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", h.Port()))
@@ -33,5 +33,5 @@ func TestHTTP(t *testing.T) {
 	b, err := ioutil.ReadAll(hc.Body)
 	tt.MustOK(err)
 	tt.MustEqual(string(b), string(bts))
-	tt.MustOK(runner.HaltAll(1*time.Second, 0))
+	tt.MustOK(runner.Shutdown(1*time.Second, 0))
 }

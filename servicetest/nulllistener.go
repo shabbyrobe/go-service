@@ -10,7 +10,7 @@ func NewNullListenerFull() *NullListenerFull {
 	return &NullListenerFull{}
 }
 
-func (t *NullListenerFull) OnServiceState(service service.Service, state service.State) {}
+func (t *NullListenerFull) OnServiceState(service service.Service, from, to service.State) {}
 
 func (t *NullListenerFull) OnServiceError(service service.Service, err service.Error) {}
 

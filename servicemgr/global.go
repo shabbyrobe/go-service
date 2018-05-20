@@ -69,7 +69,7 @@ func StartWaitListen(timeout time.Duration, l service.Listener, s service.Servic
 	if l != nil {
 		listener.Add(s, l)
 	}
-	return runner.StartWait(timeout, s)
+	return service.StartWait(runner, timeout, s)
 }
 
 func StartWait(timeout time.Duration, s service.Service) error {

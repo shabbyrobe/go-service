@@ -3,26 +3,13 @@ package service
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // Runner Starts, Halts and manages Services.
 type Runner interface {
 	State(svc Service) State
-
-	// StartWait calls a Service's Run() method in a goroutine. It waits until
-	// the service calls Context.Ready() before returning. It is a shorthand for
-	// calling Start() with a ReadySignal, then waiting for the ReadySignal.
-	//
-	// If an error is returned and the service's status is not Halted or Complete,
-	// you shoud attempt to Halt() the service. If the service does not successfully
-	// halt, you MUST panic.
-	//
-	// Timeout must be > 0. If a timeout occurs, the error returned can be checked
-	// using service.IsErrTimeout(). If StartWait times out and you do not have a
-	// mechanism to recover and kill the Service, you MUST panic.
-	//
-	StartWait(timeout time.Duration, svc Service) error
 
 	// Start a service in this runner.
 	//
@@ -45,8 +32,8 @@ type Runner interface {
 	// Timeout must be > 0.
 	Halt(timeout time.Duration, svc Service) error
 
-	// HaltAll halts all services started in this runner. The runner will retain
-	// references to the services until Unregister is called.
+	// Shutdown halts all services started in this runner and prevents new ones from
+	// being started.
 	//
 	// If any service fails to halt, err will contain an error for each service
 	// that failed, accessible by calling service.Errors(err). n will contain
@@ -54,8 +41,10 @@ type Runner interface {
 	//
 	// Timeout must be > 0.
 	//
-	// If errlimit is > 0, HaltAll will stop after that many errors occur.
-	HaltAll(timeout time.Duration, errlimit int) (n int, err error)
+	// If errlimit is > 0, Shutdown will stop after that many errors occur.
+	//
+	// It is safe to call Shutdown multiple times.
+	Shutdown(timeout time.Duration, errlimit int) (n int, err error)
 
 	// Services returns a list of services currently registered or running at
 	// the time of the call. If State is provided, only services matching the
@@ -84,6 +73,29 @@ const (
 	StageReady Stage = 1
 	StageRun   Stage = 2
 )
+
+// StartWait calls a Service's Run() method in a goroutine. It waits until
+// the service calls Context.Ready() before returning. It is a shorthand for
+// calling Start() with a ReadySignal, then waiting for the ReadySignal.
+//
+// If an error is returned and the service's status is not Halted or Complete,
+// you shoud attempt to Halt() the service. If the service does not successfully
+// halt, you should panic as resources have been lost.
+//
+// Timeout must be > 0. If a timeout occurs, the error returned can be checked
+// using service.IsErrTimeout(). If StartWait times out and you do not have a
+// mechanism to recover and kill the Service, you MUST panic.
+//
+func StartWait(runner Runner, timeout time.Duration, service Service) error {
+	if timeout <= 0 {
+		return fmt.Errorf("service: start timeout must be > 0")
+	}
+	sr := NewReadySignal()
+	if err := runner.Start(service, sr); err != nil {
+		return err
+	}
+	return WhenReady(timeout, sr)
+}
 
 func EnsureHalt(r Runner, timeout time.Duration, s Service) error {
 	err := r.Halt(timeout, s)
@@ -126,6 +138,8 @@ type runner struct {
 	errListener   ErrorListener
 	stateListener StateListener
 
+	suspended int32 // boolean; access using atomic.LoadInt32
+
 	states     map[Service]*runnerService
 	statesLock sync.RWMutex
 }
@@ -144,6 +158,7 @@ func NewRunner(listener Listener) Runner {
 
 func (r *runner) Services(query StateQuery, limit int) []Service {
 	r.statesLock.Lock()
+	defer r.statesLock.Unlock()
 
 	if limit <= 0 {
 		limit = len(r.states)
@@ -165,126 +180,101 @@ func (r *runner) Services(query StateQuery, limit int) []Service {
 		}
 	}
 
-	r.statesLock.Unlock()
-
 	return out
 }
 
-func (r *runner) StartWait(timeout time.Duration, service Service) error {
-	if timeout <= 0 {
-		return fmt.Errorf("service: start timeout must be > 0")
-	}
-	sr := NewReadySignal()
-	if err := r.Start(service, sr); err != nil {
-		return err
-	}
-	return WhenReady(timeout, sr)
-}
-
-func (r *runner) Start(service Service, ready ReadySignal) (err error) {
-	if service == nil {
+func (r *runner) Start(svc Service, ready ReadySignal) (rerr error) {
+	if svc == nil {
 		return fmt.Errorf("nil service")
 	}
-	if err = r.starting(service, ready); err != nil {
+	rs, err := r.starting(svc, ready)
+	if err != nil {
 		return err
 	}
 
-	rs := r.runnerService(service)
-	ctx := newSvcContext(service, r.Ready, r.OnError, rs.done)
+	ctx := newSvcContext(svc, r.Ready, r.OnError, rs.done)
 
 	go func() {
-		// Careful! Anything you touch in the runnerService in here must take
-		// care to synchronise.
-
-		err := service.Run(ctx)
-
-		// By the time we hit this point, the service should no longer be
-		// running at all if it was started. A badly coded service may have
-		// stray goroutines blocking on ctx.Done(), but if they are waiting
-		// at a call to '<-ctx.Done()', they will be waiting on the old
-		// channel, which should be closed when ended() calls shutdown().
-		startingCalled, readyCalled := rs.Calls()
-		wasStarted := err != nil
-
-		ready := rs.ReadySignal()
-		if wasStarted {
-			if rerr := r.ended(service); rerr != nil {
-				panic(rerr)
-			}
+		rerr := svc.Run(ctx)
+		if err := rs.Ended(svc, rerr, r.listener, r.stateListener, r.removeService); err != nil {
+			panic(err)
 		}
-
-		rs.Halted()
-
-		stage := StageRun
-		if !readyCalled {
-			stage = StageReady
-		}
-
-		if !readyCalled && startingCalled && ready != nil {
-			// If the service ended while it was starting, Ready() will never
-			// be called.
-			ready.Done(&serviceError{name: service.ServiceName(), cause: err})
-		}
-
-		if r.listener != nil {
-			go r.listener.OnServiceEnd(stage, service, WrapError(err, service))
-		}
-
 	}()
 
 	return
 }
 
-func (r *runner) State(service Service) State {
+func (r *runner) State(svc Service) (state State) {
 	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-	rs := r.states[service]
+	rs := r.states[svc]
 	if rs != nil {
-		return rs.State()
+		state = rs.State()
+	} else {
+		state = Halted
 	}
-	return Halted
+	r.statesLock.Unlock()
+	return state
 }
 
-func (r *runner) runnerService(service Service) *runnerService {
+func (r *runner) runnerService(svc Service) (rs *runnerService) {
 	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-	return r.states[service]
+	rs = r.states[svc]
+	r.statesLock.Unlock()
+	return rs
 }
 
-func (r *runner) Halt(timeout time.Duration, service Service) error {
+func (r *runner) Halt(timeout time.Duration, svc Service) error {
 	if timeout <= 0 {
 		return fmt.Errorf("service: halt timeout must be > 0")
 	}
-	if service == nil {
+	if svc == nil {
 		return fmt.Errorf("nil service")
 	}
 
-	fmt.Printf("halt halting %p\n", service)
-	if err := r.Halting(service); err != nil {
-		return err
-	}
-
-	rs := r.runnerService(service)
-	fmt.Printf("halt pre-done %p\n", service)
+	rs := r.runnerService(svc)
 	if rs == nil {
-		panic(fmt.Errorf("runnerService should not be nil! %p", service))
-	}
-	rs.Done()
-
-	after := time.After(timeout)
-	select {
-	case <-rs.halted:
-	case <-after:
-		return errHaltTimeout(0)
+		return errServiceUnknown(0)
 	}
 
-	if err := r.Halted(service); err != nil {
+	fromState, err := rs.Halting(svc, r.stateListener)
+	if err != nil {
 		return err
 	}
+
+	initiator := fromState != Halting
+
+	if err := rs.EndWait(timeout); err != nil {
+		return err
+	}
+
+	if initiator {
+		if _, err := rs.Halted(svc, r.stateListener, false, r.removeService); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error) {
+func (r *runner) removeService(svc Service) {
+	r.statesLock.Lock()
+	delete(r.states, svc)
+	r.statesLock.Unlock()
+}
+
+func (r *runner) Suspend() (success bool) {
+	return atomic.CompareAndSwapInt32(&r.suspended, 0, 1)
+}
+
+func (r *runner) Suspended() bool {
+	return atomic.LoadInt32(&r.suspended) == 1
+}
+
+func (r *runner) Shutdown(timeout time.Duration, errlimit int) (n int, rerr error) {
+	if !r.Suspend() {
+		return 0, nil
+	}
+
 	if timeout <= 0 {
 		return 0, fmt.Errorf("service: halt timeout must be > 0")
 	}
@@ -298,7 +288,7 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 			break
 		}
 
-		if err := r.Halting(service); err != nil {
+		if err := r.Halt(timeout, service); err != nil {
 			// It's OK if it has already halted - it may have ended while
 			// we were iterating.
 			if serr, ok := err.(*errState); ok && !serr.Current.IsRunning() {
@@ -312,22 +302,7 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 				continue
 			}
 
-			errors = append(errors, err)
-			continue
-		}
-
-		rs := r.runnerService(service)
-		rs.Done()
-
-		after := time.After(timeout)
-		select {
-		case <-rs.halted:
-		case <-after:
-			errors = append(errors, errHaltTimeout(0))
-			continue
-		}
-		if err := r.Halted(service); err != nil {
-			errors = append(errors, err)
+			errors = append(errors, &serviceError{cause: err, name: service.ServiceName()})
 			continue
 		}
 
@@ -341,26 +316,31 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 	return n, nil
 }
 
-func (r *runner) starting(service Service, ready ReadySignal) error {
+func (r *runner) starting(svc Service, ready ReadySignal) (rs *runnerService, rerr error) {
+	if atomic.LoadInt32(&r.suspended) == 1 {
+		return nil, errRunnerSuspended(1)
+	}
+
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 
-	var rs = r.states[service]
+	rsNew := false
+	rs = r.states[svc]
 	if rs == nil {
+		rsNew = true
 		rs = newRunnerService()
-		r.states[service] = rs
 	}
 
-	if _, err := rs.SetState(Starting); err != nil {
-		return err
+	if _, err := rs.Starting(svc, r.stateListener); err != nil {
+		return nil, err
 	}
 
+	if rsNew {
+		r.states[svc] = rs
+	}
 	rs.resetStarting(ready)
 
-	if r.stateListener != nil {
-		go r.stateListener.OnServiceState(service, Starting)
-	}
-	return nil
+	return rs, nil
 }
 
 func (r *runner) OnError(service Service, err error) {
@@ -369,94 +349,21 @@ func (r *runner) OnError(service Service, err error) {
 	}
 }
 
-func (r *runner) Ready(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-	if r.states[service] == nil {
+func (r *runner) Ready(svc Service) error {
+	rs := r.runnerService(svc)
+	if rs == nil {
 		return errServiceUnknown(0)
 	}
 
-	rs := r.states[service]
-	rs.Ready()
+	rs.Ready(nil)
 
-	var serr *errState
-	if _, err := rs.SetState(Started); err != nil {
-		var ok bool
-		if serr, ok = err.(*errState); ok {
-			// State errors don't matter here -
+	if _, err := rs.Started(svc, r.stateListener); err != nil {
+		if _, ok := err.(*errState); ok {
+			// State errors don't matter here
 			err = nil
 		} else {
 			return err
 		}
-	}
-	if serr != nil && r.stateListener != nil {
-		go r.stateListener.OnServiceState(service, Started)
-	}
-	return nil
-}
-
-func (r *runner) Halting(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-
-	if r.states[service] == nil {
-		return errServiceUnknown(0)
-	}
-	old, err := r.states[service].SetState(Halting)
-	fmt.Println(old)
-	if err != nil {
-		return err
-	}
-	if r.stateListener != nil {
-		go r.stateListener.OnServiceState(service, Halting)
-	}
-	return nil
-}
-
-func (r *runner) Halted(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-
-	rs := r.states[service]
-	if rs == nil {
-		// This should not be an error - Halting() should catch any situation
-		// where this matters. If we are hitting this code, we may have simultaneous
-		// calls to Halt() waiting for the service to finish.
-		return nil
-	}
-	return r.shutdown(rs, service)
-}
-
-// ended is used to bring the state of the service to a Halted state
-// if it ends before Halt is called.
-func (r *runner) ended(service Service) error {
-	r.statesLock.Lock()
-	defer r.statesLock.Unlock()
-
-	rs := r.states[service]
-
-	if _, err := rs.SetState(Halting); IsErrNotRunning(err) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	rs.Done()
-
-	return r.shutdown(rs, service)
-}
-
-// shutdown assumes r.statesLock is acquired.
-func (r *runner) shutdown(rs *runnerService, service Service) error {
-	if _, err := rs.SetState(Halted); err != nil {
-		return err
-	}
-	if !rs.Retain() {
-		fmt.Printf("shutdown %p\n", service)
-		delete(r.states, service)
-	}
-	if r.stateListener != nil {
-		go r.stateListener.OnServiceState(service, Halted)
 	}
 	return nil
 }

@@ -31,7 +31,7 @@ func TestGroup(t *testing.T) {
 	r := service.NewRunner(NewNullListenerFull())
 	g := service.NewGroup("yep", s1, s2)
 
-	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r, dto, g))
 	tt.MustOK(r.Halt(dto, g))
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 
@@ -50,7 +50,7 @@ func TestGroupEndOne(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r, dto, g))
 	defer service.MustEnsureHalt(r, dto, g)
 	mustRecv(tt, ew, dto)
 
@@ -72,7 +72,7 @@ func TestGroupOneFailsBeforeReady(t *testing.T) {
 	r := service.NewRunner(lc)
 	g := service.NewGroup("yep", s1, s2, s3)
 
-	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
+	tt.MustEqual(e1, cause(service.StartWait(r, dto, g)))
 	defer service.MustEnsureHalt(r, dto, g)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
@@ -93,7 +93,7 @@ func TestGroupOneFailsAfterReady(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r, dto, g))
 	defer service.MustEnsureHalt(r, dto, g)
 	mustRecv(tt, ew, dto)
 
@@ -116,7 +116,7 @@ func TestGroupEndMultiple(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r, dto, g))
 	mustRecv(tt, ew, dto)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
@@ -137,7 +137,7 @@ func TestGroupEndAll(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustOK(r.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r, dto, g))
 	mustRecv(tt, ew, dto)
 
 	assertStartHaltCount(tt, 1, 1, s1, s2, s3)
@@ -156,8 +156,8 @@ func TestGroupRunTwice(t *testing.T) {
 	r2 := service.NewRunner(NewNullListenerFull())
 	g := service.NewGroup("yep", s1, s2)
 
-	tt.MustOK(r1.StartWait(dto, g))
-	tt.MustOK(r2.StartWait(dto, g))
+	tt.MustOK(service.StartWait(r1, dto, g))
+	tt.MustOK(service.StartWait(r2, dto, g))
 	tt.MustOK(r1.Halt(dto, g))
 	tt.MustOK(r2.Halt(dto, g))
 
@@ -178,7 +178,7 @@ func TestGroupStartError(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
+	tt.MustEqual(e1, cause(service.StartWait(r, dto, g)))
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 1, 0, s3)
@@ -205,7 +205,7 @@ func TestGroupStartMultipleErrors(t *testing.T) {
 
 	ew := lc.EndWaiter(g, 1)
 	expErr := []error{e1, e2}
-	foundErr := cause(r.StartWait(dto, g))
+	foundErr := cause(service.StartWait(r, dto, g))
 	tt.MustEqual(expErr, causeListSorted(foundErr))
 
 	assertStartHaltCount(tt, 1, 1, s1)
@@ -240,7 +240,7 @@ func TestGroupRunnerErrorWithFailingStart(t *testing.T) {
 	g := service.NewGroupWithRunnerBuilder("yep", runnerBuilder, s1, s2, s3)
 
 	ew := lc.EndWaiter(g, 1)
-	tt.MustEqual(e1, cause(r.StartWait(dto, g)))
+	tt.MustEqual(e1, cause(service.StartWait(r, dto, g)))
 
 	assertStartHaltCount(tt, 1, 1, s1, s2)
 	assertStartHaltCount(tt, 0, 0, s3)
@@ -275,7 +275,7 @@ func TestGroupOnError(t *testing.T) {
 	g := service.NewGroup("yep", s1, s2)
 	ew := lc.ErrWaiter(g, expected)
 
-	tt.MustOK(r.StartWait(tscale*10, g))
+	tt.MustOK(service.StartWait(r, tscale*10, g))
 
 	errs := ew.TakeN(expected, tscale*10)
 	tt.MustOK(r.Halt(dto, g))
@@ -291,11 +291,11 @@ func TestGroupRestartableEnabled(t *testing.T) {
 
 	lc := NewListenerCollector()
 	runner := service.NewRunner(lc)
-	defer runner.HaltAll(tscale*10, 0)
+	defer runner.Shutdown(tscale*10, 0)
 
-	tt.MustOK(runner.StartWait(tscale*10, gr))
+	tt.MustOK(service.StartWait(runner, tscale*10, gr))
 	tt.MustOK(runner.Halt(tscale*10, gr))
-	tt.MustOK(runner.StartWait(tscale*10, gr))
+	tt.MustOK(service.StartWait(runner, tscale*10, gr))
 }
 
 func TestGroupRestartableDisabled(t *testing.T) {
@@ -307,11 +307,11 @@ func TestGroupRestartableDisabled(t *testing.T) {
 
 	lc := NewListenerCollector()
 	runner := service.NewRunner(lc)
-	defer runner.HaltAll(tscale*10, 0)
+	defer runner.Shutdown(tscale*10, 0)
 
-	tt.MustOK(runner.StartWait(tscale*10, gr))
+	tt.MustOK(service.StartWait(runner, tscale*10, gr))
 	tt.MustOK(runner.Halt(tscale*10, gr))
 
-	err := runner.StartWait(tscale*10, gr)
+	err := service.StartWait(runner, tscale*10, gr)
 	tt.MustAssert(err != nil)
 }

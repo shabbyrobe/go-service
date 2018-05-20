@@ -29,7 +29,7 @@ func (g *globalProxy) Halt(timeout time.Duration, svc service.Service) error {
 	return servicemgr.Halt(timeout, svc)
 }
 
-func (g *globalProxy) HaltAll(timeout time.Duration, errlimit int) (n int, err error) {
+func (g *globalProxy) Shutdown(timeout time.Duration, errlimit int) (n int, err error) {
 	return servicemgr.Shutdown(timeout)
 }
 

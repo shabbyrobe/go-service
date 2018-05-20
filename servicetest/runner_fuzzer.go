@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -120,7 +122,7 @@ func (r *RunnerFuzzer) haltRunner() {
 		defer r.wg.Done()
 
 		// this can take a while so make sure it's done in a goroutine
-		n, _ := runner.HaltAll(r.ServiceHaltTimeout.Rand(), 0)
+		n, _ := runner.Shutdown(r.ServiceHaltTimeout.Rand(), 0)
 		r.Stats.AddServicesCurrent(-n)
 		r.Stats.AddRunnersHalted(1)
 	}()
@@ -308,7 +310,7 @@ func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) 
 
 		var err error
 		if should(r.StartWaitChance) {
-			err = runner.StartWait(r.StartWaitTimeout.Rand(), svc)
+			err = service.StartWait(runner, r.StartWaitTimeout.Rand(), svc)
 			stats.ServiceStartWait.Add(err)
 		} else {
 			err = runner.Start(svc, nil)
@@ -400,17 +402,29 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 		r.tickLoop()
 	}
 
-	r.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+
+	after := time.After(10 * time.Second)
+	select {
+	case <-after:
+		pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
+		panic("fuzzer shutdown waited too long for goroutines")
+	case <-done:
+	}
 
 	// OK now we gotta clean up after ourselves.
 	timeout := 2*time.Second + (r.ServiceHaltDelay.Max * 10)
 	for _, rn := range r.runners {
-		n, err := rn.HaltAll(timeout, 0)
+		n, err := rn.Shutdown(timeout, 0)
 		r.Stats.AddServicesCurrent(-n)
 		tt.MustOK(err)
 	}
 
-	// Need to wait for any stray halt delays - the above HaltAll
+	// Need to wait for any stray halt delays - the above Shutdown
 	// call may report everything has halted, but it is skipping
 	// things that are already Halting and not blocking to wait for them.
 	// That may not be ideal, perhaps it should be fixed.
@@ -424,6 +438,9 @@ func (r *RunnerFuzzer) Service(svc service.Service) *FuzzServiceStats {
 	default:
 		return r.Stats.ServiceStats
 	}
+}
+
+func (r *RunnerFuzzer) OnServiceState(svc service.Service, from, to service.State) {
 }
 
 func (r *RunnerFuzzer) OnServiceError(svc service.Service, err service.Error) {

@@ -135,7 +135,6 @@ func TestMain(m *testing.M) {
 	time.Sleep(20 * time.Millisecond)
 
 	if code == 0 {
-
 		after := pprof.Lookup("goroutine")
 		afterCount := after.Count()
 

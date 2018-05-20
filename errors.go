@@ -7,9 +7,10 @@ import (
 )
 
 type (
-	errWaitTimeout    int
-	errHaltTimeout    int
-	errServiceUnknown int
+	errWaitTimeout     int
+	errHaltTimeout     int
+	errServiceUnknown  int
+	errRunnerSuspended int
 )
 
 // ErrServiceEnded is a sentinel error used to indicate that a service
@@ -19,14 +20,16 @@ type (
 // it from their own services.
 var ErrServiceEnded = errors.New("service ended")
 
-func (errWaitTimeout) Error() string    { return "service: wait timeout" }
-func (errHaltTimeout) Error() string    { return "service: halt timeout" }
-func (errServiceUnknown) Error() string { return "service unknown" }
+func (errWaitTimeout) Error() string     { return "service: wait timeout" }
+func (errHaltTimeout) Error() string     { return "service: halt timeout" }
+func (errServiceUnknown) Error() string  { return "service unknown" }
+func (errRunnerSuspended) Error() string { return "service: runner was shut down" }
 
-func IsErrWaitTimeout(err error) bool    { _, ok := cause(err).(errWaitTimeout); return ok }
-func IsErrHaltTimeout(err error) bool    { _, ok := cause(err).(errHaltTimeout); return ok }
-func IsErrServiceUnknown(err error) bool { _, ok := cause(err).(errServiceUnknown); return ok }
-func IsErrServiceEnded(err error) bool   { return cause(err) == ErrServiceEnded }
+func IsErrWaitTimeout(err error) bool     { _, ok := cause(err).(errWaitTimeout); return ok }
+func IsErrHaltTimeout(err error) bool     { _, ok := cause(err).(errHaltTimeout); return ok }
+func IsErrRunnerSuspended(err error) bool { _, ok := cause(err).(errRunnerSuspended); return ok }
+func IsErrServiceUnknown(err error) bool  { _, ok := cause(err).(errServiceUnknown); return ok }
+func IsErrServiceEnded(err error) bool    { return cause(err) == ErrServiceEnded }
 
 func IsErrNotRunning(err error) bool {
 	serr, ok := cause(err).(*errState)
@@ -112,7 +115,7 @@ func (s *serviceError) Cause() error { return s.cause }
 func (s *serviceError) Name() Name   { return s.name }
 
 func (s *serviceError) Error() string {
-	return fmt.Sprintf("service %s error: %v", s.name, s.cause)
+	return fmt.Sprintf("service %q error: %v", s.name, s.cause)
 }
 
 type errState struct {
@@ -121,7 +124,7 @@ type errState struct {
 
 func (e *errState) Error() string {
 	return fmt.Sprintf(
-		"service state error: expected %s; found %s when transitioning to %s",
+		"service state error: expected %q; found %q when transitioning to %q",
 		e.Expected, e.Current, e.To)
 }
 

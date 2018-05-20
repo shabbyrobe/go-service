@@ -49,12 +49,13 @@ func (m *MyListener) OnServiceError(service Service, err Error) {}
 func (m *MyListener) OnServiceState(service Service, state State) {}
 
 func main() {
-    runner := service.NewRunner(l)
+    listener := &MyListener{}
+    runner := service.NewRunner(listener)
     svc := &MyService{}
 
     // Start a service in the background and wait for it to signal it is
     // ready:
-    if err := runner.StartWait(1 * time.Second, svc); err != nil {
+    if err := service.StartWait(runner, 1 * time.Second, svc); err != nil {
         log.Fatal(err)
     }
 
@@ -98,7 +99,7 @@ func main() {
 
     // Start the group in the background and wait for all of its child services
     // to signal they are ready:
-    if err := runner.StartWait(1 * time.Second, group); err != nil {
+    if err := service.StartWait(1 * time.Second, group); err != nil {
         log.Fatal(err)
     }
 

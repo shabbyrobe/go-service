@@ -24,7 +24,7 @@ Quick Example
 	func main() {
 		runner := service.NewRunner(nil)
 		svc := &MyService{}
-		if err := runner.StartWait(1 * time.Second, svc); err != nil {
+		if err := service.StartWait(runner, 1 * time.Second, svc); err != nil {
 			log.Fatal(err)
 		}
 		if err := runner.Halt(1 * time.Second, svc); err != nil {
@@ -144,7 +144,7 @@ To start or halt a service, a Runner is required.
 	// start another service and wait no more than 1 second until it's ready
 	// before returning:
 	svc := &MyService{}
-	err := r.StartWait(1 * time.Second, svc)
+	err := service.StartWait(r, 1 * time.Second, svc)
 
 	// the above StartWait call is equivalent to the following (error handling
 	// skipped for brevity):
@@ -159,7 +159,7 @@ To start or halt a service, a Runner is required.
 	// halt every service currently started in the runner, waiting no more
 	// than 1 second for each service to be halted (if there are 3 services,
 	// the maximum timeout will be 3 seconds):
-	err := r.HaltAll(1 * time.Second)
+	err := r.Shutdown(1 * time.Second)
 
 
 Contexts
@@ -224,11 +224,10 @@ NewRunner() takes an implementation of the Listener interface:
 		// ...
 	}
 
-Every call to Runner.Start or Runner.StartWait is matched with a call to
-OnServiceEnd, regardless of whether the call to Start/StartWait failed at
-any stage, ended prematurely, or was halted by Runner.Halt. The err argument
-will be nil if the service was halted, but MUST be an error in any other
-circumstance.
+Every call to Runner.Start or service.StartWait is matched with a call to
+OnServiceEnd, regardless of whether the call to Start failed at any stage,
+ended prematurely, or was halted by Runner.Halt. The err argument will be nil
+if the service was halted, but MUST be an error in any other circumstance.
 
 The Listener may also optionally implement service.ErrorListener and/or
 service.StateListener:
