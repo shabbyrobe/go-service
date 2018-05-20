@@ -151,6 +151,18 @@ func (s *FuzzStats) Clone() *FuzzStats {
 	return n
 }
 
+func (s *FuzzStats) Errors() (out []FuzzError) {
+	for _, e := range s.ServiceStats.Errors() {
+		e.Name = "Service/" + e.Name
+		out = append(out, e)
+	}
+	for _, e := range s.GroupStats.Errors() {
+		e.Name = "Group/" + e.Name
+		out = append(out, e)
+	}
+	return out
+}
+
 type FuzzServiceStats struct {
 	serviceErrors     map[string]int
 	serviceErrorsLock sync.RWMutex
@@ -183,6 +195,37 @@ func NewFuzzServiceStats() *FuzzServiceStats {
 		ServiceRegisterAfterStart:   &ErrorCounter{},
 		ServiceRestart:              &ErrorCounter{},
 	}
+}
+
+type FuzzError struct {
+	Name  string
+	Err   string
+	Count int
+}
+
+func (s *FuzzServiceStats) Errors() (out []FuzzError) {
+	for _, t := range []struct {
+		Name    string
+		Counter *ErrorCounter
+	}{
+		{"ServiceHalt", s.ServiceHalt},
+		{"ServiceStart", s.ServiceStart},
+		{"ServiceStartWait", s.ServiceStartWait},
+		{"ServiceUnregisterHalt", s.ServiceUnregisterHalt},
+		{"ServiceUnregisterUnexpected", s.ServiceUnregisterUnexpected},
+		{"ServiceRegisterBeforeStart", s.ServiceRegisterBeforeStart},
+		{"ServiceRegisterAfterStart", s.ServiceRegisterAfterStart},
+		{"ServiceRestart", s.ServiceRestart},
+	} {
+		for e, cnt := range t.Counter.errors {
+			out = append(out, FuzzError{
+				Name:  t.Name,
+				Err:   e,
+				Count: cnt,
+			})
+		}
+	}
+	return out
 }
 
 func (s *FuzzServiceStats) Map() map[string]interface{} {

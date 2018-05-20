@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strings"
 
 	service "github.com/shabbyrobe/go-service"
@@ -131,6 +132,34 @@ func fuzzOutputCLI(name string, stats *FuzzStats, w io.Writer) error {
 	counterRow("restart", stats.ServiceStats.ServiceRestart, stats.GroupStats.ServiceRestart)
 
 	fmt.Fprintf(w, "\n")
+
+	errs := stats.Errors()
+	if len(errs) > 0 {
+		sort.Slice(errs, func(i, j int) bool { return errs[i].Name < errs[j].Name })
+		nameLen := 0
+		numLen := 0
+		for _, e := range errs {
+			nlen := len(e.Name)
+			if nlen > nameLen {
+				nameLen = nlen
+			}
+			nums := fmt.Sprintf("x%d", e.Count)
+			nlen = len(nums)
+			if nlen > numLen {
+				numLen = nlen
+			}
+		}
+
+		fmt.Fprintf(w, "%d error(s):\n", len(errs))
+
+		for _, e := range errs {
+			fmt.Fprintf(w, "%s %s %s\n",
+				colorwr(lightRed, nameLen, ' ', e.Name),
+				colorwl(lightCyan, numLen, ' ', fmt.Sprintf("x%d", e.Count)),
+				e.Err)
+		}
+		fmt.Fprintf(w, "\n")
+	}
 
 	return nil
 }
