@@ -882,6 +882,38 @@ func TestRunnerServiceEndedNotRetained(t *testing.T) {
 	tt.MustEqual(0, len(services))
 }
 
+func TestRunnerHaltWhileStarting(t *testing.T) {
+	// If we attempt to halt a service which is in the starting state, it should
+	// halt the service and wait until the halt is complete.
+
+	t.Parallel()
+
+	type haltFunc func(r service.Runner, s service.Service) error
+
+	for _, hf := range []haltFunc{
+		func(r service.Runner, s service.Service) error { return r.Halt(dto, s) },
+		func(r service.Runner, s service.Service) error { return service.EnsureHalt(r, dto, s) },
+	} {
+		t.Run("", func(t *testing.T) {
+			tt := assert.WrapTB(t)
+
+			startDelay := 10 * tscale
+			s1 := (&BlockingService{StartDelay: startDelay}).Init()
+			lc := NewListenerCollector()
+			r := service.NewRunner(lc)
+
+			tt.MustOK(r.Start(s1, nil))
+			tt.MustAssert(r.State(s1) == service.Starting)
+			tt.MustEqual(1, len(r.Services(service.AnyState, 0)))
+
+			tt.MustOK(hf(r, s1))
+			tt.MustAssert(r.State(s1) == service.Halted)
+
+			tt.MustEqual(0, len(r.Services(service.AnyState, 0)))
+		})
+	}
+}
+
 func TestRunnerHaltWhileHalting(t *testing.T) {
 	// If we attempt to halt a service which is in the halting state, it should
 	// wait until the service is halted.
