@@ -345,13 +345,13 @@ func (r *RunnerFuzzer) doTick() {
 	// maybe start a service into one of the existing runners, chosen
 	// at random
 	scur := r.Stats.GetServicesCurrent()
-	if should(r.ServiceCreateChance) && scur < r.ServiceLimit {
+	if fuzzServices && should(r.ServiceCreateChance) && scur < r.ServiceLimit {
 		r.createService()
 	}
 
 	// maybe start a group of services into one of the existing runners, chosen
 	// at random
-	if should(r.GroupCreateChance) && scur < r.ServiceLimit {
+	if fuzzGroups && should(r.GroupCreateChance) && scur < r.ServiceLimit {
 		r.createGroup()
 	}
 

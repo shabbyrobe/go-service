@@ -175,6 +175,7 @@ func (r *runnerService) Ended(svc Service, err error, l Listener, sl StateListen
 		r.endLock.Lock()
 		close(waiter)
 		r.endWaiter = nil
+		r.endErr = nil
 		r.endLock.Unlock()
 	} else {
 		if _, err := r.Halted(svc, sl, true, remove); err != nil {
