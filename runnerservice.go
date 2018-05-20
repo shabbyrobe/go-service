@@ -103,3 +103,10 @@ func (r *runnerService) State() (s State) {
 	r.lock.Unlock()
 	return s
 }
+
+func (r *runnerService) SetState(s State) (old State, rerr error) {
+	r.lock.Lock()
+	old, rerr = r.state.set(s)
+	r.lock.Unlock()
+	return old, rerr
+}

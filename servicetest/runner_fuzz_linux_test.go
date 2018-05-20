@@ -13,16 +13,16 @@ func (r *RunnerFuzzer) tickLoop() {
 	tick := int64(r.Tick)
 
 	check := dur / tick / 10
-	i := 0
+	var i int64
 	for {
-		err := syscall.Nanosleep(syscall.Timespec{Nsec: dur}, nil)
+		err := syscall.Nanosleep(&syscall.Timespec{Nsec: dur}, nil)
 		if err != nil {
-			panic(nil)
+			panic(err)
 		}
 		r.doTick()
 		i++
 
-		if i%check == 0 && time.Since(start) > r.Duration {
+		if i%check == 0 && time.Duration(time.Now().UnixNano()-start) > r.Duration {
 			return
 		}
 	}
