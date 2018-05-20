@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type runnerState struct {
+type runnerService struct {
 	state          State
 	startingCalled bool
 	readyCalled    bool
@@ -17,13 +17,13 @@ type runnerState struct {
 	lock           sync.Mutex
 }
 
-func newRunnerState() *runnerState {
-	return &runnerState{
+func newRunnerService() *runnerService {
+	return &runnerService{
 		state: Halted,
 	}
 }
 
-func (r *runnerState) resetStarting(ready ReadySignal) {
+func (r *runnerService) resetStarting(ready ReadySignal) {
 	r.lock.Lock()
 	r.startingCalled = true
 	r.readyCalled = false
@@ -35,14 +35,14 @@ func (r *runnerState) resetStarting(ready ReadySignal) {
 	r.lock.Unlock()
 }
 
-func (r *runnerState) ReadySignal() (rs ReadySignal) {
+func (r *runnerService) ReadySignal() (rs ReadySignal) {
 	r.lock.Lock()
 	rs = r.readySignal
 	r.lock.Unlock()
 	return
 }
 
-func (r *runnerState) Done() {
+func (r *runnerService) Done() {
 	r.lock.Lock()
 	if !r.doneClosed {
 		r.doneClosed = true
@@ -51,7 +51,7 @@ func (r *runnerState) Done() {
 	r.lock.Unlock()
 }
 
-func (r *runnerState) Halted() {
+func (r *runnerService) Halted() {
 	r.lock.Lock()
 	if !r.haltedClosed {
 		r.haltedClosed = true
@@ -60,27 +60,27 @@ func (r *runnerState) Halted() {
 	r.lock.Unlock()
 }
 
-func (r *runnerState) Retain() (retain bool) {
+func (r *runnerService) Retain() (retain bool) {
 	r.lock.Lock()
 	retain = r.retain
 	r.lock.Unlock()
 	return retain
 }
 
-func (r *runnerState) SetRetain(v bool) {
+func (r *runnerService) SetRetain(v bool) {
 	r.lock.Lock()
 	r.retain = v
 	r.lock.Unlock()
 }
 
-func (r *runnerState) Calls() (starting, ready bool) {
+func (r *runnerService) Calls() (starting, ready bool) {
 	r.lock.Lock()
 	starting, ready = r.startingCalled, r.readyCalled
 	r.lock.Unlock()
 	return
 }
 
-func (r *runnerState) Ready() {
+func (r *runnerService) Ready() {
 	r.lock.Lock()
 	r.readyCalled = true
 	if r.readySignal != nil {
@@ -89,7 +89,7 @@ func (r *runnerState) Ready() {
 	r.lock.Unlock()
 }
 
-func (r *runnerState) AllState() (s State, retain bool) {
+func (r *runnerService) AllState() (s State, retain bool) {
 	r.lock.Lock()
 	s = r.state
 	retain = r.retain
@@ -97,7 +97,7 @@ func (r *runnerState) AllState() (s State, retain bool) {
 	return s, retain
 }
 
-func (r *runnerState) State() (s State) {
+func (r *runnerService) State() (s State) {
 	r.lock.Lock()
 	s = r.state
 	r.lock.Unlock()

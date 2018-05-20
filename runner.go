@@ -126,7 +126,7 @@ type runner struct {
 	errListener   ErrorListener
 	stateListener StateListener
 
-	states     map[Service]*runnerState
+	states     map[Service]*runnerService
 	statesLock sync.RWMutex
 }
 
@@ -138,7 +138,7 @@ func NewRunner(listener Listener) Runner {
 		listener:      listener,
 		errListener:   el,
 		stateListener: sl,
-		states:        make(map[Service]*runnerState),
+		states:        make(map[Service]*runnerService),
 	}
 }
 
@@ -189,11 +189,11 @@ func (r *runner) Start(service Service, ready ReadySignal) (err error) {
 		return err
 	}
 
-	rs := r.runnerState(service)
+	rs := r.runnerService(service)
 	ctx := newSvcContext(service, r.Ready, r.OnError, rs.done)
 
 	go func() {
-		// Careful! Anything you touch in the runnerState in here must take
+		// Careful! Anything you touch in the runnerService in here must take
 		// care to synchronise.
 
 		err := service.Run(ctx)
@@ -245,7 +245,7 @@ func (r *runner) State(service Service) State {
 	return Halted
 }
 
-func (r *runner) runnerState(service Service) *runnerState {
+func (r *runner) runnerService(service Service) *runnerService {
 	r.statesLock.Lock()
 	defer r.statesLock.Unlock()
 	return r.states[service]
@@ -264,10 +264,10 @@ func (r *runner) Halt(timeout time.Duration, service Service) error {
 		return err
 	}
 
-	rs := r.runnerState(service)
+	rs := r.runnerService(service)
 	fmt.Printf("halt pre-done %p\n", service)
 	if rs == nil {
-		panic(fmt.Errorf("runnerState should not be nil! %p", service))
+		panic(fmt.Errorf("runnerService should not be nil! %p", service))
 	}
 	rs.Done()
 
@@ -316,7 +316,7 @@ func (r *runner) HaltAll(timeout time.Duration, errlimit int) (n int, rerr error
 			continue
 		}
 
-		rs := r.runnerState(service)
+		rs := r.runnerService(service)
 		rs.Done()
 
 		after := time.After(timeout)
@@ -347,7 +347,7 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 
 	var rs = r.states[service]
 	if rs == nil {
-		rs = newRunnerState()
+		rs = newRunnerService()
 		r.states[service] = rs
 	}
 
@@ -447,7 +447,7 @@ func (r *runner) ended(service Service) error {
 }
 
 // shutdown assumes r.statesLock is acquired.
-func (r *runner) shutdown(rs *runnerState, service Service) error {
+func (r *runner) shutdown(rs *runnerService, service Service) error {
 	if _, err := rs.state.set(Halted); err != nil {
 		return err
 	}
@@ -467,7 +467,7 @@ func (r *runner) Register(service Service) Runner {
 
 	rs := r.states[service]
 	if rs == nil {
-		rs = newRunnerState()
+		rs = newRunnerService()
 		r.states[service] = rs
 	}
 	rs.SetRetain(true)
