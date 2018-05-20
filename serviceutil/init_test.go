@@ -1,4 +1,4 @@
-package servicemgr
+package serviceutil
 
 import (
 	"bytes"

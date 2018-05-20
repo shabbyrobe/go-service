@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +22,8 @@ type Group struct {
 	services     []Service
 	haltTimeout  time.Duration
 	readyTimeout time.Duration
+	restartable  int32
+	starts       int32
 
 	// This is here mainly for testing purposes, so we can swap out
 	// the Runner for a broken one.
@@ -34,9 +37,15 @@ func NewGroup(name Name, services ...Service) *Group {
 		haltTimeout:   GroupHaltTimeout,
 		readyTimeout:  GroupReadyTimeout,
 		runnerBuilder: NewRunner,
+		restartable:   1,
 	}
 }
 
+// NewGroupWithRunnerBuilder creates a new group, but allows you to
+// substitue the function that creates the instance of service.Runner.
+//
+// It exists purely to support testing scenarios and wouldn't exist
+// if it was possible to accomplish the necessary testing without it.
 func NewGroupWithRunnerBuilder(name Name, builder func(l Listener) Runner, services ...Service) *Group {
 	g := NewGroup(name, services...)
 	g.runnerBuilder = builder
@@ -45,7 +54,20 @@ func NewGroupWithRunnerBuilder(name Name, builder func(l Listener) Runner, servi
 
 func (g *Group) ServiceName() Name { return g.name }
 
+func (g *Group) Restartable(v bool) {
+	var vi int32
+	if v {
+		vi = 1
+	}
+	atomic.StoreInt32(&g.restartable, vi)
+}
+
 func (g *Group) Run(ctx Context) error {
+	starts := atomic.AddInt32(&g.starts, 1)
+	if starts > 1 && atomic.LoadInt32(&g.restartable) == 0 {
+		return fmt.Errorf("group: service can not be restarted")
+	}
+
 	listener := newGroupListener(len(g.services))
 	listener.done = ctx.Done()
 	runner := g.runnerBuilder(listener)

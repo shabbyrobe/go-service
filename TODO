@@ -1,4 +1,25 @@
 - service.WhenReady should take ctx so it can receive Done() signals from outside
-
 - Would be nice to be able to take a context from outside when starting a service.
+- context.Context in Ready() and Halt() Halt(context.Context, ...)
+- Tests for testing machinery. It's getting that way.
+- Nice formatting for metafuzz insanity params
+- Metafuzz parameters from an input argument
+- Fuzz servicemgr with more scenarios
+- Document usage patterns
+- fuzzer runnerWithFailingStart chance
 
+
+panic: runnerState should not be nil!
+
+goroutine 13804 [running]:
+github.com/shabbyrobe/go-service.(*runner).Halt(0xc421bed4f0, 0x2540be400, 0x147c440, 0xc4220a45a0, 0x132e405, 0x2540be400)
+	/Users/bl/code/go/src/github.com/shabbyrobe/go-service/runner.go:268 +0x3a8
+github.com/shabbyrobe/go-service.EnsureHalt(0x147fc80, 0xc421bed4f0, 0x2540be400, 0x147c440, 0xc4220a45a0, 0x0, 0x0)
+	/Users/bl/code/go/src/github.com/shabbyrobe/go-service/runner.go:89 +0x5d
+github.com/shabbyrobe/go-service/servicetest.(*RunnerFuzzer).restartService.func1(0xc4201b0180, 0x147fc80, 0xc421bed4f0)
+	/Users/bl/code/go/src/github.com/shabbyrobe/go-service/servicetest/runner_fuzzer.go:179 +0xf8
+created by github.com/shabbyrobe/go-service/servicetest.(*RunnerFuzzer).restartService
+	/Users/bl/code/go/src/github.com/shabbyrobe/go-service/servicetest/runner_fuzzer.go:174 +0xc4
+FAIL	github.com/shabbyrobe/go-service/servicetest	0.111s
+2018/05/19 11:08:43 exit status 1
+exit status 1

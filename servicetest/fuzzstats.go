@@ -107,7 +107,7 @@ func (s *FuzzStats) Map() map[string]interface{} {
 func (s *FuzzStats) MarshalJSON() ([]byte, error) {
 	// Strip off the methods before marshalling to avoid errant recursion:
 	type stats FuzzStats
-	ss := (*FuzzStats)(s)
+	ss := (*stats)(s)
 
 	bts, err := json.Marshal(ss)
 	if err != nil {
@@ -166,6 +166,7 @@ type FuzzServiceStats struct {
 	ServiceUnregisterUnexpected *ErrorCounter
 	ServiceRegisterBeforeStart  *ErrorCounter
 	ServiceRegisterAfterStart   *ErrorCounter
+	ServiceRestart              *ErrorCounter
 }
 
 func NewFuzzServiceStats() *FuzzServiceStats {
@@ -180,6 +181,7 @@ func NewFuzzServiceStats() *FuzzServiceStats {
 		ServiceUnregisterUnexpected: &ErrorCounter{},
 		ServiceRegisterBeforeStart:  &ErrorCounter{},
 		ServiceRegisterAfterStart:   &ErrorCounter{},
+		ServiceRestart:              &ErrorCounter{},
 	}
 }
 
@@ -200,6 +202,8 @@ func (s *FuzzServiceStats) Map() map[string]interface{} {
 		"ServiceRegisterBeforeStart.Failed":     s.ServiceRegisterBeforeStart.Failed(),
 		"ServiceRegisterAfterStart.Succeeded":   s.ServiceRegisterAfterStart.Succeeded(),
 		"ServiceRegisterAfterStart.Failed":      s.ServiceRegisterAfterStart.Failed(),
+		"ServiceRestart.Succeeded":              s.ServiceRestart.Succeeded(),
+		"ServiceRestart.Failed":                 s.ServiceRestart.Failed(),
 	}
 }
 
@@ -237,6 +241,7 @@ func (s *FuzzServiceStats) Clone() *FuzzServiceStats {
 	n.ServiceUnregisterUnexpected = s.ServiceUnregisterUnexpected.Clone()
 	n.ServiceRegisterAfterStart = s.ServiceRegisterAfterStart.Clone()
 	n.ServiceRegisterBeforeStart = s.ServiceRegisterBeforeStart.Clone()
+	n.ServiceRestart = s.ServiceRestart.Clone()
 
 	s.serviceEndsLock.Lock()
 	n.serviceEnded = s.serviceEnded

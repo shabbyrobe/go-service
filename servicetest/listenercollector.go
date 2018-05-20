@@ -12,14 +12,18 @@ type ListenerCollectorEnd struct {
 	Err   error
 }
 
-type listenerCollectorService struct {
-	errs       []service.Error
-	states     []service.State
-	ends       []*ListenerCollectorEnd
-	endWaiters []chan struct{}
-	errWaiters []*ErrWaiter
+type Waiter interface {
+	TakeN(n int, timeout time.Duration) []error
+	Take(timeout time.Duration) error
+	C() <-chan error
 }
 
+// ListenerCollector allows you to test things that make use of service.Runner's
+// listener.
+//
+// Please do not use it for any other purpose, it is only built to be useful in
+// a test.
+//
 type ListenerCollector struct {
 	services map[service.Service]*listenerCollectorService
 	lock     sync.Mutex
@@ -31,7 +35,7 @@ func NewListenerCollector() *ListenerCollector {
 	}
 }
 
-func (t *ListenerCollector) errs(svc service.Service) (out []service.Error) {
+func (t *ListenerCollector) Errs(svc service.Service) (out []service.Error) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	lsvc := t.services[svc]
@@ -44,7 +48,7 @@ func (t *ListenerCollector) errs(svc service.Service) (out []service.Error) {
 	return
 }
 
-func (t *ListenerCollector) ends(svc service.Service) (out []ListenerCollectorEnd) {
+func (t *ListenerCollector) Ends(svc service.Service) (out []ListenerCollectorEnd) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	lsvc := t.services[svc]
@@ -57,28 +61,34 @@ func (t *ListenerCollector) ends(svc service.Service) (out []ListenerCollectorEn
 	return
 }
 
-func (t *ListenerCollector) endWaiter(svc service.Service) chan struct{} {
+func (t *ListenerCollector) EndWaiter(svc service.Service, cap int) Waiter {
 	// FIXME: endWaiter should have a timeout
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
 	}
 	lsvc := t.services[svc]
-	w := make(chan struct{}, 1)
-	lsvc.endWaiters = append(lsvc.endWaiters, w)
+	if lsvc.endWaiter != nil {
+		close(lsvc.endWaiter.c)
+	}
+	w := &errWaiter{c: make(chan error, cap)}
+	lsvc.endWaiter = w
 	t.lock.Unlock()
 
 	return w
 }
 
-func (t *ListenerCollector) errWaiter(svc service.Service, cap int) *ErrWaiter {
+func (t *ListenerCollector) ErrWaiter(svc service.Service, cap int) Waiter {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
 	}
 	lsvc := t.services[svc]
-	w := &ErrWaiter{C: make(chan error, cap)}
-	lsvc.errWaiters = append(lsvc.errWaiters, w)
+	if lsvc.errWaiter != nil {
+		close(lsvc.errWaiter.c)
+	}
+	w := &errWaiter{c: make(chan error, cap)}
+	lsvc.errWaiter = w
 	t.lock.Unlock()
 
 	return w
@@ -102,10 +112,8 @@ func (t *ListenerCollector) OnServiceError(svc service.Service, err service.Erro
 	lsvc := t.services[svc]
 	lsvc.errs = append(lsvc.errs, err)
 
-	if len(lsvc.errWaiters) > 0 {
-		for _, w := range lsvc.errWaiters {
-			w.C <- err
-		}
+	if lsvc.errWaiter != nil {
+		lsvc.errWaiter.c <- err
 	}
 	t.lock.Unlock()
 }
@@ -121,25 +129,43 @@ func (t *ListenerCollector) OnServiceEnd(stage service.Stage, svc service.Servic
 		Stage: stage,
 		Err:   cause(err),
 	})
-	if len(lsvc.endWaiters) > 0 {
-		for _, w := range lsvc.endWaiters {
-			close(w)
-		}
-		lsvc.endWaiters = nil
+	if lsvc.endWaiter != nil {
+		lsvc.endWaiter.c <- err
 	}
 	t.lock.Unlock()
 }
 
-type ErrWaiter struct {
-	C chan error
+type listenerCollectorService struct {
+	errs      []service.Error
+	states    []service.State
+	ends      []*ListenerCollectorEnd
+	endWaiter *errWaiter
+	errWaiter *errWaiter
 }
 
-func (e *ErrWaiter) Take(n int, timeout time.Duration) []error {
+type errWaiter struct {
+	c chan error
+}
+
+func (e *errWaiter) C() <-chan error { return e.c }
+
+func (e *errWaiter) Take(timeout time.Duration) error {
+	errs := e.TakeN(1, timeout)
+	if len(errs) == 1 {
+		return errs[0]
+	} else if len(errs) == 0 {
+		return nil
+	} else {
+		panic("unexpected errors")
+	}
+}
+
+func (e *errWaiter) TakeN(n int, timeout time.Duration) []error {
 	out := make([]error, n)
 	for i := 0; i < n; i++ {
 		wait := time.After(timeout)
 		select {
-		case out[i] = <-e.C:
+		case out[i] = <-e.c:
 		case <-wait:
 			panic("errwaiter timeout")
 		}

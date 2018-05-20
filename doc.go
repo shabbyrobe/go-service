@@ -35,7 +35,7 @@ Quick Example
 
 Performance
 
-Services are by nature heavier than a regular goroutine; they're about 10x
+Services are by nature heavier than a regular goroutine; they're up to 10x
 slower and use more memory. You should probably only use Services when you need
 to fully control the management of a long-lived goroutine, otherwise they're
 likely not worth it:

@@ -10,7 +10,8 @@ type changer func(then func(err error) error) (err error)
 
 func TestStateChangerErrorPassthrough(t *testing.T) {
 	var matrix = map[State]map[State]bool{
-		Halting:  map[State]bool{Halted: true, Starting: false, Started: false, Halting: false},
+		// FROM:                 // TO:
+		Halting:  map[State]bool{Halted: true, Starting: false, Started: false, Halting: true},
 		Halted:   map[State]bool{Halted: false, Starting: true, Started: false, Halting: false},
 		Starting: map[State]bool{Halted: false, Starting: false, Started: true, Halting: true},
 		Started:  map[State]bool{Halted: false, Starting: false, Started: false, Halting: true},
@@ -18,7 +19,7 @@ func TestStateChangerErrorPassthrough(t *testing.T) {
 
 	var froms = map[State]State{
 		Halted:   Halting,
-		Halting:  Starting | Started,
+		Halting:  Starting | Started | Halting,
 		Started:  Starting,
 		Starting: Halted,
 	}
@@ -35,7 +36,8 @@ func TestStateChangerErrorPassthrough(t *testing.T) {
 				var tt = assert.WrapTB(t)
 
 				sc := from
-				result := sc.set(to)
+				last, result := sc.set(to)
+				tt.MustEqual(from, last)
 
 				if !success {
 					exp := &errState{Expected: froms[to], To: to, Current: from}

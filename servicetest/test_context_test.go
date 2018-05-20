@@ -14,13 +14,17 @@ import (
 
 func TestContextStandalone(t *testing.T) {
 	tt := assert.WrapTB(t)
+	_ = tt
+
 	c := service.Standalone()
 	s := (&BlockingService{}).Init()
 
 	end := make(chan struct{})
 	go func() {
 		defer close(end)
-		tt.MustOK(s.Run(c))
+		if err := s.Run(c); err != nil {
+			panic(err)
+		}
 	}()
 	c.Halt()
 	<-end
@@ -98,7 +102,9 @@ func TestContextNetConn(t *testing.T) {
 
 	go func() {
 		conn, err := listener.Accept()
-		tt.MustOK(err)
+		if err != nil {
+			panic(err)
+		}
 		close(listening)
 
 		go func() {

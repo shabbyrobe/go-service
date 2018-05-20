@@ -55,6 +55,13 @@ type RunnerFuzzer struct {
 	// moment.
 	ServiceUnregisterUnexpectedChance float64
 
+	// Chance that the fuzzer will attempt to restart a random service at a
+	// random moment.
+	ServiceRestartChance float64
+
+	// Chance that a service started by the fuzzer will be restartable.
+	ServiceRestartableChance float64
+
 	ServiceStartTime   TimeRange
 	StartWaitTimeout   TimeRange
 	ServiceRunTime     TimeRange
@@ -156,13 +163,53 @@ func (r *RunnerFuzzer) unexpectedUnregister() {
 	}()
 }
 
+func (r *RunnerFuzzer) restartService() {
+	idx := rand.Intn(r.Stats.GetRunnersCurrent())
+	rn := r.runners[idx]
+	if rn == nil {
+		return
+	}
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		svc := randomService(rn)
+		if svc != nil {
+			if err := service.EnsureHalt(rn, r.ServiceHaltTimeout.Rand(), svc); err != nil {
+				fmt.Println(err)
+				r.Stats.StatsForService(svc).ServiceRestart.Add(err)
+
+			} else {
+				err := rn.Start(svc, nil)
+
+				// FIXME: the fuzzer should get its stats from the state listener,
+				// not from the ended listener. These hacks are all in here because
+				// the fuzzer can only dynamically react to a service ending, but
+				// not when a service is starting.
+				if err == nil {
+					r.Stats.StatsForService(svc).ServiceStart.Add(nil)
+					r.Stats.AddServicesCurrent(1)
+				}
+
+				r.Stats.StatsForService(svc).ServiceRestart.Add(err)
+			}
+		}
+	}()
+}
+
 func (r *RunnerFuzzer) createService() {
 	service := (&TimedService{
-		StartDelay:   r.ServiceStartTime.Rand(),
-		RunTime:      r.ServiceRunTime.Rand(),
-		HaltDelay:    r.ServiceHaltDelay.Rand(),
-		HaltingSleep: true,
+		StartDelay: r.ServiceStartTime.Rand(),
+		RunTime:    r.ServiceRunTime.Rand(),
+		HaltDelay:  r.ServiceHaltDelay.Rand(),
 	}).Init()
+
+	service.StartLimit = 1
+	if should(r.ServiceRestartableChance) {
+		service.StartLimit = 0
+	}
+
 	if should(r.ServiceStartFailureChance) {
 		service.StartFailure = errStartFailure
 	} else if should(r.ServiceRunFailureChance) {
@@ -181,11 +228,11 @@ func (r *RunnerFuzzer) createGroup() {
 
 	for i := 0; i < cs; i++ {
 		service := (&TimedService{
-			StartDelay:   r.ServiceStartTime.Rand(),
-			RunTime:      r.ServiceRunTime.Rand(),
-			HaltDelay:    r.ServiceHaltDelay.Rand(),
-			HaltingSleep: true,
+			StartDelay: r.ServiceStartTime.Rand(),
+			RunTime:    r.ServiceRunTime.Rand(),
+			HaltDelay:  r.ServiceHaltDelay.Rand(),
 		}).Init()
+
 		if should(r.GroupServiceStartFailureChance) {
 			service.StartFailure = errStartFailure
 		} else if should(r.GroupServiceRunFailureChance) {
@@ -195,6 +242,11 @@ func (r *RunnerFuzzer) createGroup() {
 	}
 
 	group := service.NewGroup(n, services...)
+
+	if !should(r.ServiceRestartableChance) {
+		group.Restartable(false)
+	}
+
 	r.runService(group, r.Stats.GroupStats)
 }
 
@@ -309,6 +361,11 @@ func (r *RunnerFuzzer) doTick() {
 	// maybe check the state of a randomly chosen service
 	if should(r.ServiceUnregisterUnexpectedChance) {
 		r.unexpectedUnregister()
+	}
+
+	// maybe restart a random service
+	if should(r.ServiceRestartChance) {
+		r.restartService()
 	}
 
 	r.Stats.AddTick()
@@ -435,12 +492,12 @@ func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 		GroupSize:                         f.GroupSize.Rand(),
 		RunnerCreateChance:                f.RunnerCreateChance.Rand(),
 		RunnerHaltChance:                  f.RunnerHaltChance.Rand(),
-		RunnerLimit:                       DefaultRunnerLimit,
+		RunnerLimit:                       fuzzDefaultRunnerLimit,
 		ServiceCreateChance:               f.ServiceCreateChance.Rand(),
 		ServiceHaltAfter:                  f.ServiceHaltAfter.Rand(),
 		ServiceHaltDelay:                  f.ServiceHaltDelay.Rand(),
 		ServiceHaltTimeout:                f.ServiceHaltTimeout.Rand(),
-		ServiceLimit:                      DefaultServiceLimit,
+		ServiceLimit:                      fuzzDefaultServiceLimit,
 		ServiceRunFailureChance:           f.ServiceRunFailureChance.Rand(),
 		ServiceRunTime:                    f.ServiceRunTime.Rand(),
 		ServiceStartFailureChance:         f.ServiceStartFailureChance.Rand(),

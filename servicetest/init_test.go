@@ -30,6 +30,9 @@ var (
 	fuzzDebugHost    string
 	fuzzMetaRolls    int64
 	fuzzMetaMin      int
+
+	fuzzDefaultRunnerLimit  int
+	fuzzDefaultServiceLimit int
 )
 
 // Used for expvar
@@ -54,7 +57,7 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&fuzzTimeStr, "service.fuzztime", "1s",
 		"Run the fuzzer for this duration")
 	flag.Int64Var(&fuzzTickNsec, "service.fuzzticknsec", 0,
-		"How frequently to tick in the fuzzer's loop.")
+		"How frequently to tick in the fuzzer's loop (0 for a hot loop).")
 	flag.Int64Var(&fuzzSeed, "service.fuzzseed", -1,
 		"Randomise the fuzz tester with this non-negative seed prior to every fuzz test")
 	flag.StringVar(&fuzzDebugHost, "service.debughost", "",
@@ -65,6 +68,10 @@ func TestMain(m *testing.M) {
 		"Minimum number of times to run the meta fuzzer regardless of duration")
 	flag.StringVar(&fuzzOutputFormat, "service.fuzzoutfmt", "cli",
 		"Fuzz verbose output format (cli or json)")
+	flag.IntVar(&fuzzDefaultRunnerLimit, "service.fuzzrunnerlim", 20000,
+		"Limit the number of runners that can concurrently exist if the fuzz test does not explicitly declare a limit")
+	flag.IntVar(&fuzzDefaultServiceLimit, "service.fuzzservicelim", 100000,
+		"Limit the number of services that can concurrently exist if the fuzz test does not explicitly declare a limit")
 
 	flag.Parse()
 

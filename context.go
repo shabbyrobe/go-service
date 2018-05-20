@@ -126,6 +126,9 @@ func (f *runContext) WhenError(errFunc func(svc Service, err error)) RunContext 
 // If you want to capture ready signals, see RunContext.WhenReady(). To capture
 // non-halting error signals, see RunContext.WhenError().
 //
+// This whole concept isn't great; if it's possible to remove it'll probably
+// be removed. It's not a good idea to use it.
+//
 func Standalone() RunContext {
 	ctx := &runContext{
 		svcContext: svcContext{

@@ -10,11 +10,6 @@ import (
 	"github.com/shabbyrobe/golib/assert"
 )
 
-const (
-	DefaultRunnerLimit  int = 20000
-	DefaultServiceLimit int = 100000
-)
-
 func TestRunnerFuzzHappy(t *testing.T) {
 	tt := assert.WrapTB(t)
 	// Happy config: should yield no errors
@@ -24,6 +19,9 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		SyncHalt:           true,
 		RunnerCreateChance: 0.001,
 		RunnerHaltChance:   0.0,
+
+		ServiceRestartableChance: 1.0,
+		ServiceRestartChance:     0.01,
 
 		ServiceCreateChance:       0.2,
 		ServiceStartFailureChance: 0,
@@ -38,7 +36,7 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
 		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceHaltAfter:   TimeRange{200 * time.Millisecond, 1 * time.Second},
+		ServiceHaltAfter:   TimeRange{10 * time.Microsecond, 1 * time.Second},
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
@@ -48,6 +46,65 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		ServiceUnregisterUnexpectedChance: 0,
 
 		StateCheckChance: 0.2,
+
+		Stats: stats,
+	})
+
+	tt.MustEqual(0, stats.GetServicesCurrent())
+	for _, s := range []*FuzzServiceStats{stats.ServiceStats, stats.GroupStats} {
+		tt.MustEqual(0, s.ServiceHalt.Failed())
+		tt.MustEqual(0, s.ServiceStart.Failed())
+		tt.MustEqual(0, s.ServiceStartWait.Failed())
+		tt.MustEqual(0, s.ServiceRegisterBeforeStart.Failed())
+		tt.MustEqual(0, s.ServiceUnregisterHalt.Failed())
+		tt.MustEqual(0, s.ServiceUnregisterUnexpected.Failed())
+	}
+}
+
+func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
+	// Happy config: should yield no errors. Low maximum service limit,
+	// fast ending services. This was added to raise the probability of
+	// complex interactions happening between starts and halts.
+	//
+	// It helped find a bug that the fuzzer tripped where restarting
+	// a service could cause a panic because the runner was somehow
+	// able to end up in a starting or started state in between the
+	// calls to Halting and Halted.
+
+	tt := assert.WrapTB(t)
+	stats := NewFuzzStats()
+	testFuzz(t, &RunnerFuzzer{
+		Tick:               time.Duration(fuzzTickNsec),
+		SyncHalt:           true,
+		RunnerCreateChance: 0.0,
+		RunnerHaltChance:   0.0,
+		RunnerLimit:        1,
+
+		ServiceLimit: 2,
+
+		ServiceRestartableChance: 1.0,
+		ServiceRestartChance:     1.0,
+
+		ServiceCreateChance:       0.1,
+		ServiceStartFailureChance: 0,
+		ServiceRunFailureChance:   0,
+
+		GroupCreateChance: 0,
+
+		StartWaitChance:    0,
+		ServiceStartTime:   TimeRange{0, 0},
+		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceHaltAfter:   TimeRange{100 * time.Microsecond, 10000 * time.Microsecond},
+		ServiceHaltDelay:   TimeRange{0, 0},
+		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
+
+		ServiceRegisterBeforeStartChance:  0,
+		ServiceRegisterAfterStartChance:   0,
+		ServiceUnregisterHaltChance:       0,
+		ServiceUnregisterUnexpectedChance: 0,
+
+		StateCheckChance: 0,
 
 		Stats: stats,
 	})
@@ -363,10 +420,10 @@ func testFuzz(t *testing.T, fz *RunnerFuzzer) {
 	}
 
 	if fz.RunnerLimit == 0 {
-		fz.RunnerLimit = DefaultRunnerLimit
+		fz.RunnerLimit = fuzzDefaultRunnerLimit
 	}
 	if fz.ServiceLimit == 0 {
-		fz.ServiceLimit = DefaultServiceLimit
+		fz.ServiceLimit = fuzzDefaultServiceLimit
 	}
 
 	rand.Seed(fuzzSeed)

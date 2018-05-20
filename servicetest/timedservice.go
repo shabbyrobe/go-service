@@ -8,13 +8,14 @@ import (
 )
 
 type TimedService struct {
-	Name         service.Name
-	StartFailure error
-	StartDelay   time.Duration
-	RunFailure   error
-	RunTime      time.Duration
-	HaltDelay    time.Duration
-	HaltingSleep bool
+	Name            service.Name
+	StartFailure    error
+	StartDelay      time.Duration
+	StartLimit      int
+	RunFailure      error
+	RunTime         time.Duration
+	HaltDelay       time.Duration
+	UnhaltableSleep bool
 
 	init   bool
 	starts int32
@@ -41,7 +42,10 @@ func (d *TimedService) Run(ctx service.Context) error {
 		panic("call Init()!")
 	}
 
-	atomic.AddInt32(&d.starts, 1)
+	starts := atomic.AddInt32(&d.starts, 1)
+	if d.StartLimit > 0 && int(starts) > d.StartLimit {
+		return errStartLimit
+	}
 
 	if d.StartDelay > 0 {
 		time.Sleep(d.StartDelay)
@@ -56,10 +60,10 @@ func (d *TimedService) Run(ctx service.Context) error {
 	defer atomic.AddInt32(&d.halts, 1)
 
 	if d.RunTime > 0 {
-		if d.HaltingSleep {
-			service.Sleep(ctx, d.RunTime)
-		} else {
+		if d.UnhaltableSleep {
 			time.Sleep(d.RunTime)
+		} else {
+			service.Sleep(ctx, d.RunTime)
 		}
 	}
 	if service.IsDone(ctx) {

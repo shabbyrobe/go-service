@@ -7,10 +7,10 @@ import (
 )
 
 type listenerDispatcher struct {
-	listeners        map[service.Service]service.Listener
-	listenersNHError map[service.Service]service.ErrorListener
-	listenersState   map[service.Service]service.StateListener
-	retained         map[service.Service]bool
+	listeners      map[service.Service]service.Listener
+	listenersError map[service.Service]service.ErrorListener
+	listenersState map[service.Service]service.StateListener
+	retained       map[service.Service]bool
 
 	defaultListener      service.Listener
 	defaultErrorListener service.ErrorListener
@@ -21,10 +21,10 @@ type listenerDispatcher struct {
 
 func newListenerDispatcher() *listenerDispatcher {
 	return &listenerDispatcher{
-		listeners:        make(map[service.Service]service.Listener),
-		listenersNHError: make(map[service.Service]service.ErrorListener),
-		listenersState:   make(map[service.Service]service.StateListener),
-		retained:         make(map[service.Service]bool),
+		listeners:      make(map[service.Service]service.Listener),
+		listenersError: make(map[service.Service]service.ErrorListener),
+		listenersState: make(map[service.Service]service.StateListener),
+		retained:       make(map[service.Service]bool),
 	}
 }
 
@@ -42,7 +42,7 @@ func (g *listenerDispatcher) Add(svc service.Service, l service.Listener) {
 	defer g.lock.Unlock()
 	g.listeners[svc] = l
 	if el, ok := l.(service.ErrorListener); ok {
-		g.listenersNHError[svc] = el
+		g.listenersError[svc] = el
 	}
 	if sl, ok := l.(service.StateListener); ok {
 		g.listenersState[svc] = sl
@@ -74,7 +74,7 @@ func (g *listenerDispatcher) Remove(service service.Service) {
 // remove expects g.loc is acquired
 func (g *listenerDispatcher) remove(service service.Service) {
 	delete(g.listeners, service)
-	delete(g.listenersNHError, service)
+	delete(g.listenersError, service)
 	delete(g.listenersState, service)
 	delete(g.retained, service)
 }
@@ -96,7 +96,7 @@ func (g *listenerDispatcher) OnServiceEnd(stage service.Stage, service service.S
 
 func (g *listenerDispatcher) OnServiceError(svc service.Service, err service.Error) {
 	g.lock.Lock()
-	l, ok := g.listenersNHError[svc]
+	l, ok := g.listenersError[svc]
 	if !ok {
 		l = g.defaultErrorListener
 	}

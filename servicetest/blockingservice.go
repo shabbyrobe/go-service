@@ -12,8 +12,9 @@ import (
 type BlockingService struct {
 	Name         service.Name
 	StartFailure error
-	RunFailure   error
+	StartLimit   int
 	StartDelay   time.Duration
+	RunFailure   error
 	HaltDelay    time.Duration
 
 	starts int32
@@ -39,7 +40,10 @@ func (d *BlockingService) Run(ctx service.Context) error {
 		panic("call Init()!")
 	}
 
-	atomic.AddInt32(&d.starts, 1)
+	starts := atomic.AddInt32(&d.starts, 1)
+	if d.StartLimit > 0 && int(starts) > d.StartLimit {
+		return errStartLimit
+	}
 
 	if d.StartDelay > 0 {
 		time.Sleep(d.StartDelay)

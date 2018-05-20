@@ -121,7 +121,7 @@ type errState struct {
 
 func (e *errState) Error() string {
 	return fmt.Sprintf(
-		"state error: expected %s, found %s when transitioning to %s",
+		"service state error: expected %s; found %s when transitioning to %s",
 		e.Expected, e.Current, e.To)
 }
 

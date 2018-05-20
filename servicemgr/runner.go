@@ -16,10 +16,10 @@ import (
 type manager struct {
 	runner service.Runner
 
-	listeners        map[service.Service]Listener
-	listenersNHError map[service.Service]NonHaltingErrorListener
-	listenersState   map[service.Service]StateListener
-	retained         map[service.Service]bool
+	listeners      map[service.Service]service.Listener
+	listenersError map[service.Service]service.ErrorListener
+	listenersState map[service.Service]service.StateListener
+	retained       map[service.Service]bool
 
 	defaultListener service.Listener
 	lock            sync.Mutex
@@ -27,10 +27,10 @@ type manager struct {
 
 func newManager() *manager {
 	m := &manager{
-		listeners:        make(map[service.Service]Listener),
-		listenersNHError: make(map[service.Service]NonHaltingErrorListener),
-		listenersState:   make(map[service.Service]StateListener),
-		retained:         make(map[service.Service]bool),
+		listeners:      make(map[service.Service]service.Listener),
+		listenersError: make(map[service.Service]service.ErrorListener),
+		listenersState: make(map[service.Service]service.StateListener),
+		retained:       make(map[service.Service]bool),
 	}
 	m.runner = service.NewRunner(m)
 	return m
@@ -100,10 +100,10 @@ func (m *manager) Listen(service service.Service, l Listener) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.listeners[service] = l
-	if el, ok := l.(NonHaltingErrorListener); ok {
-		m.listenersNHError[service] = el
+	if el, ok := l.(service.ErrorListener); ok {
+		m.listenersError[service] = el
 	}
-	if sl, ok := l.(StateListener); ok {
+	if sl, ok := l.(service.StateListener); ok {
 		m.listenersState[service] = sl
 	}
 }
@@ -117,14 +117,14 @@ func (m *manager) Unlisten(service service.Service) {
 // unlisten expects m.lock is acquired
 func (m *manager) unlisten(service service.Service) {
 	delete(m.listeners, service)
-	delete(m.listenersNHError, service)
+	delete(m.listenersError, service)
 	delete(m.listenersState, service)
 	delete(m.retained, service)
 }
 
 func (m *manager) OnServiceError(service service.Service, err service.Error) {
 	m.lock.Lock()
-	l, ok := m.listenersNHError[service]
+	l, ok := m.listenersError[service]
 	if !ok {
 		l = m.defaultListener
 	}

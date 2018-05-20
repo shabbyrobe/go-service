@@ -27,7 +27,7 @@ func BenchmarkGoroutineStart10(b *testing.B) {
 
 func benchmarkRunnerStartN(b *testing.B, n int) {
 	tt := assert.WrapTB(b)
-	r := service.NewRunner(NewNullListener())
+	r := service.NewRunner(nil)
 
 	svcs := make([]service.Service, n)
 	for i := 0; i < n; i++ {

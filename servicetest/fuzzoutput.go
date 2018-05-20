@@ -128,6 +128,7 @@ func fuzzOutputCLI(name string, stats *FuzzStats, w io.Writer) error {
 	counterRow("reg after start", stats.ServiceStats.ServiceRegisterAfterStart, stats.GroupStats.ServiceRegisterAfterStart)
 	counterRow("unregister halt", stats.ServiceStats.ServiceUnregisterHalt, stats.GroupStats.ServiceUnregisterHalt)
 	counterRow("unregister wat", stats.ServiceStats.ServiceUnregisterUnexpected, stats.GroupStats.ServiceUnregisterUnexpected)
+	counterRow("restart", stats.ServiceStats.ServiceRestart, stats.GroupStats.ServiceRestart)
 
 	fmt.Fprintf(w, "\n")
 

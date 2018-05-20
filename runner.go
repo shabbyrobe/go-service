@@ -259,13 +259,15 @@ func (r *runner) Halt(timeout time.Duration, service Service) error {
 		return fmt.Errorf("nil service")
 	}
 
+	fmt.Printf("halt halting %p\n", service)
 	if err := r.Halting(service); err != nil {
 		return err
 	}
 
 	rs := r.runnerState(service)
+	fmt.Printf("halt pre-done %p\n", service)
 	if rs == nil {
-		panic("runnerState should not be nil!")
+		panic(fmt.Errorf("runnerState should not be nil! %p", service))
 	}
 	rs.Done()
 
@@ -349,7 +351,7 @@ func (r *runner) starting(service Service, ready ReadySignal) error {
 		r.states[service] = rs
 	}
 
-	if err := rs.state.set(Starting); err != nil {
+	if _, err := rs.state.set(Starting); err != nil {
 		return err
 	}
 
@@ -378,7 +380,7 @@ func (r *runner) Ready(service Service) error {
 	rs.Ready()
 
 	var serr *errState
-	if err := rs.state.set(Started); err != nil {
+	if _, err := rs.state.set(Started); err != nil {
 		var ok bool
 		if serr, ok = err.(*errState); ok {
 			// State errors don't matter here -
@@ -400,7 +402,9 @@ func (r *runner) Halting(service Service) error {
 	if r.states[service] == nil {
 		return errServiceUnknown(0)
 	}
-	if err := r.states[service].state.set(Halting); err != nil {
+	old, err := r.states[service].state.set(Halting)
+	fmt.Println(old)
+	if err != nil {
 		return err
 	}
 	if r.stateListener != nil {
@@ -415,7 +419,10 @@ func (r *runner) Halted(service Service) error {
 
 	rs := r.states[service]
 	if rs == nil {
-		return errServiceUnknown(0)
+		// This should not be an error - Halting() should catch any situation
+		// where this matters. If we are hitting this code, we may have simultaneous
+		// calls to Halt() waiting for the service to finish.
+		return nil
 	}
 	return r.shutdown(rs, service)
 }
@@ -428,7 +435,7 @@ func (r *runner) ended(service Service) error {
 
 	rs := r.states[service]
 
-	if err := rs.state.set(Halting); IsErrNotRunning(err) {
+	if _, err := rs.state.set(Halting); IsErrNotRunning(err) {
 		return nil
 	} else if err != nil {
 		return err
@@ -441,10 +448,11 @@ func (r *runner) ended(service Service) error {
 
 // shutdown assumes r.statesLock is acquired.
 func (r *runner) shutdown(rs *runnerState, service Service) error {
-	if err := rs.state.set(Halted); err != nil {
+	if _, err := rs.state.set(Halted); err != nil {
 		return err
 	}
 	if !rs.Retain() {
+		fmt.Printf("shutdown %p\n", service)
 		delete(r.states, service)
 	}
 	if r.stateListener != nil {

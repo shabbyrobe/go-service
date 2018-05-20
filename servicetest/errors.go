@@ -1,8 +1,11 @@
 package servicetest
 
 import (
+	"errors"
 	"sort"
 )
+
+var errStartLimit = errors.New("start limit exceeded")
 
 func ErrorListSorted(err error) (out []error) {
 	if eg, ok := err.(errorGroup); ok {

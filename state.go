@@ -20,6 +20,7 @@ type State int
 func (s State) IsRunning() bool { return s == Starting || s == Started }
 
 func (s State) String() string {
+
 	switch s {
 	case Halted:
 		return "halted"
@@ -29,6 +30,8 @@ func (s State) String() string {
 		return "started"
 	case Started | Starting:
 		return "started or starting"
+	case Started | Starting | Halting:
+		return "started, starting or halting"
 	case Halting:
 		return "halting"
 	default:
@@ -43,7 +46,7 @@ func (s State) validFrom() State {
 	case Started:
 		return Starting
 	case Halting:
-		return Started | Starting
+		return Started | Starting | Halting
 	case Halted:
 		return Halting
 	default:
@@ -51,14 +54,14 @@ func (s State) validFrom() State {
 	}
 }
 
-func (s *State) set(next State) (err error) {
+func (s *State) set(next State) (last State, err error) {
 	from := next.validFrom()
 	sv := *s
 	if from&sv != sv {
-		return &errState{from, next, sv}
+		return sv, &errState{from, next, sv}
 	}
 	*s = next
-	return nil
+	return sv, nil
 }
 
 type StateQuery int

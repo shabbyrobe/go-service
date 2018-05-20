@@ -2,16 +2,17 @@ package servicetest
 
 import service "github.com/shabbyrobe/go-service"
 
-type NullListener struct{}
+type NullListenerFull struct{}
 
-var _ service.ListenerFull = &NullListener{}
+var _ service.ListenerFull = &NullListenerFull{}
 
-func NewNullListener() *NullListener {
-	return &NullListener{}
+func NewNullListenerFull() *NullListenerFull {
+	return &NullListenerFull{}
 }
 
-func (t *NullListener) OnServiceState(service service.Service, state service.State) {}
+func (t *NullListenerFull) OnServiceState(service service.Service, state service.State) {}
 
-func (t *NullListener) OnServiceError(service service.Service, err service.Error) {}
+func (t *NullListenerFull) OnServiceError(service service.Service, err service.Error) {}
 
-func (t *NullListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {}
+func (t *NullListenerFull) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
+}

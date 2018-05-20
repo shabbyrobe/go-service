@@ -71,8 +71,7 @@ func NewMultiReadySignal(expected int) MultiReadySignal {
 func WhenReady(timeout time.Duration, r ReadySignal) error {
 	errc := make(chan error, 1)
 	go func() {
-		err := <-r.Ready()
-		errc <- err
+		errc <- <-r.Ready()
 	}()
 
 	var after <-chan time.Time
