@@ -334,7 +334,6 @@ func (r *runner) starting(svc Service, ready ReadySignal) (rs *runnerService, re
 	if _, err := rs.Starting(svc, r.stateListener); err != nil {
 		return nil, err
 	}
-
 	if rsNew {
 		r.states[svc] = rs
 	}

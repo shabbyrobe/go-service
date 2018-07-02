@@ -18,44 +18,31 @@ type FuzzStats struct {
 	RunnersHalted   int32
 	ServicesCurrent int32
 
-	ServiceStats *FuzzServiceStats
-	GroupStats   *FuzzServiceStats
-
+	ServiceStats          *FuzzServiceStats
 	StateCheckResults     map[service.State]int
 	stateCheckResultsLock sync.Mutex
 
-	GroupSizes     map[int]int
-	groupSizesLock sync.Mutex
-	start          time.Time
+	start time.Time
 }
 
 func NewFuzzStats() *FuzzStats {
 	return &FuzzStats{
-		GroupStats:        NewFuzzServiceStats(),
 		ServiceStats:      NewFuzzServiceStats(),
-		GroupSizes:        make(map[int]int),
 		StateCheckResults: make(map[service.State]int),
 	}
 }
 
 func (s *FuzzStats) StatsForService(svc service.Service) *FuzzServiceStats {
-	switch svc.(type) {
-	case *service.Group:
-		return s.GroupStats
-	default:
-		return s.ServiceStats
-	}
+	return s.ServiceStats
 }
 
 func (s *FuzzStats) Starts() int {
 	return s.ServiceStats.ServiceStart.Total() +
-		s.ServiceStats.ServiceStartWait.Total() +
-		s.GroupStats.ServiceStart.Total() +
-		s.GroupStats.ServiceStartWait.Total()
+		s.ServiceStats.ServiceStartWait.Total()
 }
 
 func (s *FuzzStats) Ends() int {
-	return int(s.ServiceStats.ServiceEnded()) + int(s.GroupStats.ServiceEnded())
+	return int(s.ServiceStats.ServiceEnded())
 }
 
 func (s *FuzzStats) Start() {
@@ -79,12 +66,6 @@ func (s *FuzzStats) AddRunnersStarted(n int) { atomic.AddInt32(&s.RunnersStarted
 func (s *FuzzStats) GetRunnersHalted() int  { return int(atomic.LoadInt32(&s.RunnersHalted)) }
 func (s *FuzzStats) AddRunnersHalted(n int) { atomic.AddInt32(&s.RunnersHalted, int32(n)) }
 
-func (s *FuzzStats) AddGroupSize(size int) {
-	s.groupSizesLock.Lock()
-	s.GroupSizes[size]++
-	s.groupSizesLock.Unlock()
-}
-
 func (s *FuzzStats) AddStateCheckResult(state service.State) {
 	s.stateCheckResultsLock.Lock()
 	s.StateCheckResults[state]++
@@ -100,7 +81,6 @@ func (s *FuzzStats) Map() map[string]interface{} {
 		"RunnersHalted":   s.GetRunnersHalted(),
 		"ServicesCurrent": s.GetServicesCurrent(),
 		"ServiceStats":    s.ServiceStats.Map(),
-		"GroupStats":      s.GroupStats.Map(),
 	}
 }
 
@@ -134,13 +114,6 @@ func (s *FuzzStats) Clone() *FuzzStats {
 	n.ServicesCurrent = int32(s.GetServicesCurrent())
 
 	n.ServiceStats = s.ServiceStats.Clone()
-	n.GroupStats = s.GroupStats.Clone()
-
-	s.groupSizesLock.Lock()
-	for m, c := range s.GroupSizes {
-		n.GroupSizes[m] = c
-	}
-	s.groupSizesLock.Unlock()
 
 	s.stateCheckResultsLock.Lock()
 	for m, c := range s.StateCheckResults {
@@ -154,10 +127,6 @@ func (s *FuzzStats) Clone() *FuzzStats {
 func (s *FuzzStats) Errors() (out []FuzzError) {
 	for _, e := range s.ServiceStats.Errors() {
 		e.Name = "Service/" + e.Name
-		out = append(out, e)
-	}
-	for _, e := range s.GroupStats.Errors() {
-		e.Name = "Group/" + e.Name
 		out = append(out, e)
 	}
 	return out

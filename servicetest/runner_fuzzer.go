@@ -72,11 +72,6 @@ type RunnerFuzzer struct {
 	ServiceHaltTimeout TimeRange
 	StateCheckChance   float64
 
-	GroupCreateChance              float64
-	GroupSize                      IntRange
-	GroupServiceStartFailureChance float64
-	GroupServiceRunFailureChance   float64
-
 	Stats *FuzzStats `json:"-"`
 
 	runners []service.Runner `json:"-"`
@@ -220,38 +215,6 @@ func (r *RunnerFuzzer) createService() {
 	r.runService(service, r.Stats.ServiceStats)
 }
 
-func (r *RunnerFuzzer) createGroup() {
-	n := service.Name(fmt.Sprintf("%d", rand.Int()))
-
-	var services []service.Service
-
-	cs := r.GroupSize.Rand()
-	r.Stats.AddGroupSize(cs)
-
-	for i := 0; i < cs; i++ {
-		service := (&TimedService{
-			StartDelay: r.ServiceStartTime.Rand(),
-			RunTime:    r.ServiceRunTime.Rand(),
-			HaltDelay:  r.ServiceHaltDelay.Rand(),
-		}).Init()
-
-		if should(r.GroupServiceStartFailureChance) {
-			service.StartFailure = errStartFailure
-		} else if should(r.GroupServiceRunFailureChance) {
-			service.RunFailure = errRunFailure
-		}
-		services = append(services, service)
-	}
-
-	group := service.NewGroup(n, services...)
-
-	if !should(r.ServiceRestartableChance) {
-		group.Restartable(false)
-	}
-
-	r.runService(group, r.Stats.GroupStats)
-}
-
 func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) {
 	runner := r.runners[rand.Intn(r.Stats.GetRunnersCurrent())]
 
@@ -349,12 +312,6 @@ func (r *RunnerFuzzer) doTick() {
 		r.createService()
 	}
 
-	// maybe start a group of services into one of the existing runners, chosen
-	// at random
-	if fuzzGroups && should(r.GroupCreateChance) && scur < r.ServiceLimit {
-		r.createGroup()
-	}
-
 	// maybe check the state of a randomly chosen service
 	if should(r.StateCheckChance) {
 		r.checkState()
@@ -431,35 +388,20 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	time.Sleep(r.ServiceHaltDelay.Max)
 }
 
-func (r *RunnerFuzzer) Service(svc service.Service) *FuzzServiceStats {
-	switch svc.(type) {
-	case *service.Group:
-		return r.Stats.GroupStats
-	default:
-		return r.Stats.ServiceStats
-	}
+func (r *RunnerFuzzer) ServiceStats(svc service.Service) *FuzzServiceStats {
+	return r.Stats.ServiceStats
 }
 
 func (r *RunnerFuzzer) OnServiceState(svc service.Service, from, to service.State) {
 }
 
 func (r *RunnerFuzzer) OnServiceError(svc service.Service, err service.Error) {
-	switch svc.(type) {
-	case *service.Group:
-		r.Stats.GroupStats.AddServiceError(err)
-	default:
-		r.Stats.ServiceStats.AddServiceError(err)
-	}
+	r.Stats.ServiceStats.AddServiceError(err)
 }
 
 func (r *RunnerFuzzer) OnServiceEnd(stage service.Stage, svc service.Service, err service.Error) {
 	var s *FuzzServiceStats
-	switch svc.(type) {
-	case *service.Group:
-		s = r.Stats.GroupStats
-	default:
-		s = r.Stats.ServiceStats
-	}
+	s = r.Stats.ServiceStats
 	s.AddServiceEnd(err)
 
 	r.Stats.AddServicesCurrent(-1)
@@ -479,11 +421,6 @@ type RunnerFuzzerBuilder struct {
 	RunnerHaltChance   FloatRange
 
 	ServiceCreateChance FloatRange
-	GroupCreateChance   FloatRange
-	GroupSize           IntRangeMaker
-
-	GroupServiceStartFailureChance FloatRange
-	GroupServiceRunFailureChance   FloatRange
 
 	StartWaitChance           FloatRange
 	ServiceStartFailureChance FloatRange
@@ -503,10 +440,6 @@ type RunnerFuzzerBuilder struct {
 func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 	return &RunnerFuzzer{
 		Duration:                          dur,
-		GroupCreateChance:                 f.GroupCreateChance.Rand(),
-		GroupServiceRunFailureChance:      f.GroupServiceRunFailureChance.Rand(),
-		GroupServiceStartFailureChance:    f.GroupServiceStartFailureChance.Rand(),
-		GroupSize:                         f.GroupSize.Rand(),
 		RunnerCreateChance:                f.RunnerCreateChance.Rand(),
 		RunnerHaltChance:                  f.RunnerHaltChance.Rand(),
 		RunnerLimit:                       fuzzDefaultRunnerLimit,

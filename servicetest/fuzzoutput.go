@@ -69,24 +69,6 @@ func fuzzOutputCLI(name string, stats *FuzzStats, w io.Writer) error {
 
 	fmt.Fprintf(w, "%s  ", heading("groups"))
 
-	minsz, maxsz := math.MaxInt64, 0
-	for sz := range stats.GroupSizes {
-		if sz > maxsz {
-			maxsz = sz
-		}
-		if sz < minsz {
-			minsz = sz
-		}
-	}
-
-	for i := minsz; i < maxsz; i++ {
-		cnt := stats.GroupSizes[i]
-		fmt.Fprintf(w, "%s:%s ",
-			color(lightGray, i),
-			color(yellow, cnt))
-	}
-	fmt.Fprintf(w, "\n")
-
 	fmt.Fprintf(w, "%s  %s/%s ", heading("starts/ends"), value(stats.Starts()), value(stats.Ends()))
 
 	diff := stats.Ends() - stats.Starts()
@@ -108,28 +90,24 @@ func fuzzOutputCLI(name string, stats *FuzzStats, w io.Writer) error {
 		subheading("started"), value(stats.RunnersStarted))
 
 	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "%s %s %s %s %s %s %s\n", rowhead(""),
-		colhead("svc ok"), colhead("svc err"), colhead("svc pct"),
-		colhead("grp ok"), colhead("grp err"), colhead("grp pct"))
+	fmt.Fprintf(w, "%s %s %s %s\n", rowhead(""),
+		colhead("svc ok"), colhead("svc err"), colhead("svc pct"))
 
-	counterRow := func(head string, svc, grp *ErrorCounter) {
-		fmt.Fprintf(w, "%s %s %s %s %s %s %s\n", rowhead(head),
+	counterRow := func(head string, svc *ErrorCounter) {
+		fmt.Fprintf(w, "%s %s %s %s\n", rowhead(head),
 			okcol(svc.Succeeded()),
 			errcol(svc.Failed()),
-			pctcol(math.Round(svc.Percent())),
-			okcol(grp.Succeeded()),
-			errcol(grp.Failed()),
-			pctcol(math.Round(grp.Percent())))
+			pctcol(math.Round(svc.Percent())))
 	}
 
-	counterRow("start", stats.ServiceStats.ServiceStart, stats.GroupStats.ServiceStart)
-	counterRow("start wait", stats.ServiceStats.ServiceStartWait, stats.GroupStats.ServiceStartWait)
-	counterRow("halt", stats.ServiceStats.ServiceHalt, stats.GroupStats.ServiceHalt)
-	counterRow("reg before start", stats.ServiceStats.ServiceRegisterBeforeStart, stats.GroupStats.ServiceRegisterBeforeStart)
-	counterRow("reg after start", stats.ServiceStats.ServiceRegisterAfterStart, stats.GroupStats.ServiceRegisterAfterStart)
-	counterRow("unregister halt", stats.ServiceStats.ServiceUnregisterHalt, stats.GroupStats.ServiceUnregisterHalt)
-	counterRow("unregister wat", stats.ServiceStats.ServiceUnregisterUnexpected, stats.GroupStats.ServiceUnregisterUnexpected)
-	counterRow("restart", stats.ServiceStats.ServiceRestart, stats.GroupStats.ServiceRestart)
+	counterRow("start", stats.ServiceStats.ServiceStart)
+	counterRow("start wait", stats.ServiceStats.ServiceStartWait)
+	counterRow("halt", stats.ServiceStats.ServiceHalt)
+	counterRow("reg before start", stats.ServiceStats.ServiceRegisterBeforeStart)
+	counterRow("reg after start", stats.ServiceStats.ServiceRegisterAfterStart)
+	counterRow("unregister halt", stats.ServiceStats.ServiceUnregisterHalt)
+	counterRow("unregister wat", stats.ServiceStats.ServiceUnregisterUnexpected)
+	counterRow("restart", stats.ServiceStats.ServiceRestart)
 
 	fmt.Fprintf(w, "\n")
 

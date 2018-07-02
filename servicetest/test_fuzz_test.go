@@ -27,11 +27,6 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0,
-		GroupServiceRunFailureChance:   0,
-
 		StartWaitChance:    0.2,
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
@@ -51,7 +46,7 @@ func TestRunnerFuzzHappy(t *testing.T) {
 	})
 
 	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats, stats.GroupStats} {
+	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
 		tt.MustEqual(0, s.ServiceStartWait.Failed())
@@ -89,8 +84,6 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
-		GroupCreateChance: 0,
-
 		StartWaitChance:    0,
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
@@ -110,7 +103,7 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 	})
 
 	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats, stats.GroupStats} {
+	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
 		tt.MustEqual(0, s.ServiceStartWait.Failed())
@@ -136,11 +129,6 @@ func TestRunnerFuzzGlobalHappy(t *testing.T) {
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0,
-		GroupServiceRunFailureChance:   0,
-
 		StartWaitChance:    0.2,
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
@@ -160,7 +148,7 @@ func TestRunnerFuzzGlobalHappy(t *testing.T) {
 	})
 
 	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats, stats.GroupStats} {
+	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
 		tt.MustEqual(0, s.ServiceStartWait.Failed())
@@ -184,11 +172,6 @@ func TestRunnerFuzzReasonable(t *testing.T) {
 		ServiceStartFailureChance: 0.01,
 		ServiceRunFailureChance:   0.02,
 
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0.02,
-		GroupServiceRunFailureChance:   0.02,
-
 		StartWaitChance:    0.2,
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
@@ -211,10 +194,6 @@ func TestRunnerFuzzReasonable(t *testing.T) {
 	tt.MustEqual(0, stats.GetServicesCurrent())
 	tt.MustEqual(stats.Starts(), stats.Ends())
 
-	tt.MustAssert(stats.GroupStats.ServiceStartWait.Succeeded() > stats.GroupStats.ServiceStartWait.Failed())
-	tt.MustAssert(stats.GroupStats.ServiceStart.Succeeded() > stats.GroupStats.ServiceStart.Failed())
-	tt.MustAssert(stats.GroupStats.ServiceHalt.Succeeded() > stats.GroupStats.ServiceHalt.Failed())
-
 	tt.MustAssert(stats.ServiceStats.ServiceStartWait.Succeeded() > stats.ServiceStats.ServiceStartWait.Failed())
 	tt.MustAssert(stats.ServiceStats.ServiceStart.Succeeded() > stats.ServiceStats.ServiceStart.Failed())
 	tt.MustAssert(stats.ServiceStats.ServiceHalt.Succeeded() > stats.ServiceStats.ServiceHalt.Failed())
@@ -230,11 +209,6 @@ func TestRunnerFuzzMessy(t *testing.T) {
 		ServiceCreateChance:       0.2,
 		ServiceStartFailureChance: 0.05,
 		ServiceRunFailureChance:   0.05,
-
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0.05,
-		GroupServiceRunFailureChance:   0.05,
 
 		StartWaitChance:                   0.2,
 		ServiceStartTime:                  TimeRange{0, 21 * time.Millisecond},
@@ -260,7 +234,7 @@ func TestRunnerFuzzMessy(t *testing.T) {
 	//         fz.Stats.ServiceStats.ServiceEnds["service ended"],
 	//     fz.Stats.ServiceStats.ServiceStart.succeeded)
 
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats, stats.GroupStats} {
+	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
 		tt.MustEqual(0, s.ServiceStart.Failed())
 	}
 }
@@ -276,11 +250,6 @@ func TestRunnerFuzzOutrage(t *testing.T) {
 		ServiceCreateChance:       0.3,
 		ServiceStartFailureChance: 0.1,
 		ServiceRunFailureChance:   0.2,
-
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0.05,
-		GroupServiceRunFailureChance:   0.05,
 
 		StartWaitChance:                   0.2,
 		ServiceStartTime:                  TimeRange{0, 50 * time.Millisecond},
@@ -319,11 +288,6 @@ func TestRunnerFuzzImpatient(t *testing.T) {
 		ServiceCreateChance:       0.2,
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
-
-		GroupCreateChance:              0.2,
-		GroupSize:                      IntRange{2, 4},
-		GroupServiceStartFailureChance: 0,
-		GroupServiceRunFailureChance:   0,
 
 		StartWaitChance:    0.2,
 		ServiceStartTime:   TimeRange{0, 0},
@@ -364,14 +328,9 @@ func TestRunnerMetaFuzzInsanity(t *testing.T) {
 		RunnerCreateChance: FloatRange{0.001, 0.02},
 		RunnerHaltChance:   FloatRange{0, 0.001},
 
-		ServiceCreateChance: FloatRange{0.001, 0.5},
-		GroupCreateChance:   FloatRange{0.0, 0.5},
-		GroupSize:           IntRangeMaker{IntRange{2, 3}, IntRange{3, 5}},
-
-		ServiceStartFailureChance:      FloatRange{0, 0.01},
-		ServiceRunFailureChance:        FloatRange{0, 0.01},
-		GroupServiceStartFailureChance: FloatRange{0, 0.01},
-		GroupServiceRunFailureChance:   FloatRange{0, 0.01},
+		ServiceCreateChance:       FloatRange{0.001, 0.5},
+		ServiceStartFailureChance: FloatRange{0, 0.01},
+		ServiceRunFailureChance:   FloatRange{0, 0.01},
 
 		StartWaitChance:    FloatRange{0, 1},
 		ServiceStartTime:   TimeRangeMaker{TimeRange{0, 0}, TimeRange{0, 10 * time.Millisecond}},
