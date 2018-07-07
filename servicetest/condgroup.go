@@ -33,10 +33,11 @@ func (wg *condGroup) Stop() {
 	wg.cond.Broadcast()
 }
 
-func (wg *condGroup) Count() int {
+func (wg *condGroup) Count() (out int) {
 	wg.lock.Lock()
-	defer wg.lock.Unlock()
-	return wg.count
+	out = wg.count
+	wg.lock.Unlock()
+	return out
 }
 
 func (wg *condGroup) Done() { wg.Add(-1) }
