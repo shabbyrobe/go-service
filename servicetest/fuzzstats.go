@@ -18,7 +18,7 @@ type FuzzStats struct {
 	RunnersHalted   int32
 	ServicesCurrent int32
 
-	ServiceStats          *FuzzServiceStats
+	Service               *FuzzServiceStats
 	StateCheckResults     map[service.State]int
 	stateCheckResultsLock sync.Mutex
 
@@ -27,22 +27,18 @@ type FuzzStats struct {
 
 func NewFuzzStats() *FuzzStats {
 	return &FuzzStats{
-		ServiceStats:      NewFuzzServiceStats(),
+		Service:           NewFuzzServiceStats(),
 		StateCheckResults: make(map[service.State]int),
 	}
 }
 
-func (s *FuzzStats) StatsForService(svc service.Service) *FuzzServiceStats {
-	return s.ServiceStats
-}
-
 func (s *FuzzStats) Starts() int {
-	return s.ServiceStats.ServiceStart.Total() +
-		s.ServiceStats.ServiceStartWait.Total()
+	return s.Service.ServiceStart.Total() +
+		s.Service.ServiceStartWait.Total()
 }
 
 func (s *FuzzStats) Ends() int {
-	return int(s.ServiceStats.ServiceEnded())
+	return int(s.Service.ServiceEnded())
 }
 
 func (s *FuzzStats) Start() {
@@ -80,7 +76,7 @@ func (s *FuzzStats) Map() map[string]interface{} {
 		"RunnersStarted":  s.GetRunnersStarted(),
 		"RunnersHalted":   s.GetRunnersHalted(),
 		"ServicesCurrent": s.GetServicesCurrent(),
-		"ServiceStats":    s.ServiceStats.Map(),
+		"Service":         s.Service.Map(),
 	}
 }
 
@@ -113,7 +109,7 @@ func (s *FuzzStats) Clone() *FuzzStats {
 	n.RunnersHalted = int32(s.GetRunnersHalted())
 	n.ServicesCurrent = int32(s.GetServicesCurrent())
 
-	n.ServiceStats = s.ServiceStats.Clone()
+	n.Service = s.Service.Clone()
 
 	s.stateCheckResultsLock.Lock()
 	for m, c := range s.StateCheckResults {
@@ -125,7 +121,7 @@ func (s *FuzzStats) Clone() *FuzzStats {
 }
 
 func (s *FuzzStats) Errors() (out []FuzzError) {
-	for _, e := range s.ServiceStats.Errors() {
+	for _, e := range s.Service.Errors() {
 		e.Name = "Service/" + e.Name
 		out = append(out, e)
 	}

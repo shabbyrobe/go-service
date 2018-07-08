@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -8,106 +9,79 @@ import (
 	"github.com/shabbyrobe/golib/assert"
 )
 
-func TestSingleReadySignalCancel(t *testing.T) {
+func TestSignalPutNil(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewReadySignal().(*singleReadySignal)
-	srs.Cancel()
-	err := <-srs.Ready()
-	tt.MustAssert(IsErrSignalCancelled(err))
-
-	// subsequent calls to Ready should not block
-	err = <-srs.Ready()
-	tt.MustOK(err)
-}
-
-func TestSingleReadySignalCancelUnblocks(t *testing.T) {
-	tt := assert.WrapTB(t)
-
-	srs := NewReadySignal().(*singleReadySignal)
-
-	out := make(chan error, 1)
-	go func() {
-		out <- <-srs.Ready()
-	}()
-
-	srs.Cancel()
-	tt.MustAssert(IsErrSignalCancelled(<-out))
-	tt.MustOK(<-srs.Ready())
-}
-
-func TestSingleReadySignalPutNil(t *testing.T) {
-	tt := assert.WrapTB(t)
-
-	srs := NewReadySignal().(*singleReadySignal)
+	srs := NewSignal().(*signal)
 	tt.MustAssert(srs.Done(nil))
-	tt.MustOK(<-srs.Ready())
-	tt.MustOK(<-srs.Ready())
+	tt.MustOK(<-srs.Waiter())
+	tt.MustOK(<-srs.Waiter())
 
 	// Make sure we can't call Done again after
 	tt.MustAssert(!srs.Done(nil))
 
-	// Subsequent calls to Ready() should immediately yield
+	// Subsequent calls to Waiter() should immediately yield
 	tt.MustAssert(!srs.Done(errors.New("yep")))
 }
 
-func TestSingleReadySignalPutError(t *testing.T) {
+func TestSignalPutError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewReadySignal().(*singleReadySignal)
+	srs := NewSignal().(*signal)
 	err := errors.New("yep")
 	tt.MustAssert(srs.Done(err))
-	tt.MustEqual(err, <-srs.Ready())
-	tt.MustOK(<-srs.Ready())
+	tt.MustEqual(err, <-srs.Waiter())
+	tt.MustOK(<-srs.Waiter())
 
-	// Subsequent calls to Ready() should immediately yield
-	tt.MustOK(<-srs.Ready())
+	// Subsequent calls to Waiter() should immediately yield
+	tt.MustOK(<-srs.Waiter())
 
 	// Make sure we can't call Done again after
 	tt.MustAssert(!srs.Done(nil))
 	tt.MustAssert(!srs.Done(err))
 }
 
-func TestSingleReadySignalWhenReadyTimeout(t *testing.T) {
+func TestSignalWhenWaiterTimeout(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewReadySignal().(*singleReadySignal)
-	err := WhenReady(tscale, srs)
-	tt.MustAssert(IsErrWaitTimeout(err))
+	srs := NewSignal().(*signal)
 
-	tt.MustEqual(signalCancelled, atomic.LoadInt32(&srs.state))
-	tt.MustEqual(int32(1), atomic.LoadInt32(&srs.readyCalled))
+	err := AwaitSignalTimeout(tscale, srs)
+	tt.MustEqual(err, context.DeadlineExceeded)
 
-	// The signal should be cancelled, so receiving on Ready should return
+	tt.MustEqual(int32(1), atomic.LoadInt32(&srs.signalled))
+
+	// The signal should be cancelled, so receiving on Waiter should return
 	// immediately.
-	tt.MustOK(<-srs.Ready())
+	tt.MustOK(<-srs.Waiter())
 }
 
-func TestSingleReadySignalWhenReadyError(t *testing.T) {
+func TestSignalWhenWaiterError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewReadySignal().(*singleReadySignal)
+	srs := NewSignal().(*signal)
 	err := errors.New("yep")
 	srs.Done(err)
-	tt.MustEqual(err, WhenReady(tscale, srs))
 
-	tt.MustOK(<-srs.Ready())
+	tt.MustEqual(err, AwaitSignalTimeout(tscale, srs))
+
+	tt.MustOK(<-srs.Waiter())
 }
 
-func TestSingleReadySignalWhenReady(t *testing.T) {
+func TestSignalWhenWaiter(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewReadySignal().(*singleReadySignal)
+	srs := NewSignal().(*signal)
 	srs.Done(nil)
-	tt.MustOK(WhenReady(tscale, srs))
+	tt.MustOK(AwaitSignalTimeout(tscale, srs))
 
-	tt.MustOK(<-srs.Ready())
+	tt.MustOK(<-srs.Waiter())
 }
 
-func TestMultiReadySignal(t *testing.T) {
+func TestMultiWaiterSignal(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	mrs := NewMultiReadySignal(1)
+	mrs := NewMultiSignal(1)
 	mrs.Done(nil)
 
 	// should be able to increase count after it has been decreased to zero
@@ -119,12 +93,12 @@ func TestMultiReadySignal(t *testing.T) {
 	mrs.Done(nil)
 	mrs.Done(nil)
 
-	tt.MustOK(<-mrs.Ready())
+	tt.MustOK(<-mrs.Waiter())
 
-	// subsequent calls to Ready should not block
-	tt.MustOK(<-mrs.Ready())
+	// subsequent calls to Waiter should not block
+	tt.MustOK(<-mrs.Waiter())
 
-	// calls to Add() after Ready() has yielded should panic
+	// calls to Add() after Waiter() has yielded should panic
 	defer func() {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
@@ -137,17 +111,17 @@ func TestMultiReadySignal(t *testing.T) {
 	mrs.Add(1)
 }
 
-func TestMultiReadySignalCancelUnblocks(t *testing.T) {
+func TestMultiWaiterSignalCancelUnblocks(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	mrs := NewMultiReadySignal(1)
+	mrs := NewMultiSignal(1)
 
 	out := make(chan error, 1)
 	go func() {
-		out <- <-mrs.Ready()
+		out <- <-mrs.Waiter()
 	}()
 
-	mrs.Cancel()
+	mrs.(*multiSignal).Cancel()
 	tt.MustAssert(IsErrSignalCancelled(<-out))
-	tt.MustOK(<-mrs.Ready())
+	tt.MustOK(<-mrs.Waiter())
 }

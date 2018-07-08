@@ -35,18 +35,13 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		ServiceRegisterBeforeStartChance:  0.1,
-		ServiceRegisterAfterStartChance:   0.1,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0,
-
 		StateCheckChance: 0.2,
 
 		Stats: stats,
 	})
 
 	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
+	for _, s := range []*FuzzServiceStats{stats.Service} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
 		tt.MustEqual(0, s.ServiceStartWait.Failed())
@@ -92,63 +87,13 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		ServiceRegisterBeforeStartChance:  0,
-		ServiceRegisterAfterStartChance:   0,
-		ServiceUnregisterHaltChance:       0,
-		ServiceUnregisterUnexpectedChance: 0,
-
 		StateCheckChance: 0,
 
 		Stats: stats,
 	})
 
 	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
-		tt.MustEqual(0, s.ServiceHalt.Failed())
-		tt.MustEqual(0, s.ServiceStart.Failed())
-		tt.MustEqual(0, s.ServiceStartWait.Failed())
-		tt.MustEqual(0, s.ServiceRegisterBeforeStart.Failed())
-		tt.MustEqual(0, s.ServiceUnregisterHalt.Failed())
-		tt.MustEqual(0, s.ServiceUnregisterUnexpected.Failed())
-	}
-}
-
-func TestRunnerFuzzGlobalHappy(t *testing.T) {
-	tt := assert.WrapTB(t)
-	// Happy config: should yield no errors
-	stats := NewFuzzStats()
-	testFuzz(t, &RunnerFuzzer{
-		RunnerSource: &ServiceManagerRunnerSource{},
-
-		Tick:               time.Duration(fuzzTickNsec),
-		SyncHalt:           true,
-		RunnerCreateChance: 0.001,
-		RunnerHaltChance:   0.0,
-
-		ServiceCreateChance:       0.2,
-		ServiceStartFailureChance: 0,
-		ServiceRunFailureChance:   0,
-
-		StartWaitChance:    0.2,
-		ServiceStartTime:   TimeRange{0, 0},
-		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceHaltAfter:   TimeRange{200 * time.Millisecond, 1 * time.Second},
-		ServiceHaltDelay:   TimeRange{0, 0},
-		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
-
-		ServiceRegisterBeforeStartChance:  0.1,
-		ServiceRegisterAfterStartChance:   0.1,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0,
-
-		StateCheckChance: 0.2,
-
-		Stats: stats,
-	})
-
-	tt.MustEqual(0, stats.GetServicesCurrent())
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
+	for _, s := range []*FuzzServiceStats{stats.Service} {
 		tt.MustEqual(0, s.ServiceHalt.Failed())
 		tt.MustEqual(0, s.ServiceStart.Failed())
 		tt.MustEqual(0, s.ServiceStartWait.Failed())
@@ -180,11 +125,6 @@ func TestRunnerFuzzReasonable(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 100 * time.Microsecond},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		ServiceRegisterBeforeStartChance:  0.01,
-		ServiceRegisterAfterStartChance:   0.01,
-		ServiceUnregisterHaltChance:       0.01,
-		ServiceUnregisterUnexpectedChance: 0.01,
-
 		StateCheckChance: 0.2,
 
 		Stats: stats,
@@ -194,9 +134,9 @@ func TestRunnerFuzzReasonable(t *testing.T) {
 	tt.MustEqual(0, stats.GetServicesCurrent())
 	tt.MustEqual(stats.Starts(), stats.Ends())
 
-	tt.MustAssert(stats.ServiceStats.ServiceStartWait.Succeeded() > stats.ServiceStats.ServiceStartWait.Failed())
-	tt.MustAssert(stats.ServiceStats.ServiceStart.Succeeded() > stats.ServiceStats.ServiceStart.Failed())
-	tt.MustAssert(stats.ServiceStats.ServiceHalt.Succeeded() > stats.ServiceStats.ServiceHalt.Failed())
+	tt.MustAssert(stats.Service.ServiceStartWait.Succeeded() > stats.Service.ServiceStartWait.Failed())
+	tt.MustAssert(stats.Service.ServiceStart.Succeeded() > stats.Service.ServiceStart.Failed())
+	tt.MustAssert(stats.Service.ServiceHalt.Succeeded() > stats.Service.ServiceHalt.Failed())
 }
 
 func TestRunnerFuzzMessy(t *testing.T) {
@@ -210,16 +150,14 @@ func TestRunnerFuzzMessy(t *testing.T) {
 		ServiceStartFailureChance: 0.05,
 		ServiceRunFailureChance:   0.05,
 
-		StartWaitChance:                   0.2,
-		ServiceStartTime:                  TimeRange{0, 21 * time.Millisecond},
-		StartWaitTimeout:                  TimeRange{20 * time.Millisecond, 1 * time.Second},
-		ServiceRunTime:                    TimeRange{0, 500 * time.Millisecond},
-		ServiceHaltAfter:                  TimeRange{0, 500 * time.Millisecond},
-		ServiceHaltDelay:                  TimeRange{0, 10 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{9 * time.Millisecond, 10 * time.Millisecond},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0.02,
+		StartWaitChance:    0.2,
+		ServiceStartTime:   TimeRange{0, 21 * time.Millisecond},
+		StartWaitTimeout:   TimeRange{20 * time.Millisecond, 1 * time.Second},
+		ServiceRunTime:     TimeRange{0, 500 * time.Millisecond},
+		ServiceHaltAfter:   TimeRange{0, 500 * time.Millisecond},
+		ServiceHaltDelay:   TimeRange{0, 10 * time.Millisecond},
+		ServiceHaltTimeout: TimeRange{9 * time.Millisecond, 10 * time.Millisecond},
+		StateCheckChance:   0.2,
 
 		Stats: stats,
 	}
@@ -234,7 +172,7 @@ func TestRunnerFuzzMessy(t *testing.T) {
 	//         fz.Stats.ServiceStats.ServiceEnds["service ended"],
 	//     fz.Stats.ServiceStats.ServiceStart.succeeded)
 
-	for _, s := range []*FuzzServiceStats{stats.ServiceStats} {
+	for _, s := range []*FuzzServiceStats{stats.Service} {
 		tt.MustEqual(0, s.ServiceStart.Failed())
 	}
 }
@@ -251,16 +189,14 @@ func TestRunnerFuzzOutrage(t *testing.T) {
 		ServiceStartFailureChance: 0.1,
 		ServiceRunFailureChance:   0.2,
 
-		StartWaitChance:                   0.2,
-		ServiceStartTime:                  TimeRange{0, 50 * time.Millisecond},
-		StartWaitTimeout:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceRunTime:                    TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltAfter:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltDelay:                  TimeRange{0, 50 * time.Millisecond},
-		ServiceHaltTimeout:                TimeRange{1 * time.Nanosecond, 50 * time.Millisecond},
-		StateCheckChance:                  0.2,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0.3,
+		StartWaitChance:    0.2,
+		ServiceStartTime:   TimeRange{0, 50 * time.Millisecond},
+		StartWaitTimeout:   TimeRange{0, 50 * time.Millisecond},
+		ServiceRunTime:     TimeRange{0, 50 * time.Millisecond},
+		ServiceHaltAfter:   TimeRange{0, 50 * time.Millisecond},
+		ServiceHaltDelay:   TimeRange{0, 50 * time.Millisecond},
+		ServiceHaltTimeout: TimeRange{1 * time.Nanosecond, 50 * time.Millisecond},
+		StateCheckChance:   0.2,
 
 		Stats: NewFuzzStats(),
 	})
@@ -296,11 +232,6 @@ func TestRunnerFuzzImpatient(t *testing.T) {
 		ServiceHaltAfter:   TimeRange{0, 0},
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{1 * time.Second, 1 * time.Second},
-
-		ServiceRegisterBeforeStartChance:  0.1,
-		ServiceRegisterAfterStartChance:   0.1,
-		ServiceUnregisterHaltChance:       0.3,
-		ServiceUnregisterUnexpectedChance: 0,
 
 		StateCheckChance: 0.2,
 
@@ -340,9 +271,7 @@ func TestRunnerMetaFuzzInsanity(t *testing.T) {
 		ServiceHaltDelay:   TimeRangeMaker{TimeRange{0, 0}, TimeRange{0, 0}},
 		ServiceHaltTimeout: TimeRangeMaker{TimeRange{1 * time.Second, 1 * time.Second}, TimeRange{1 * time.Second, 1 * time.Second}},
 
-		StateCheckChance:                  FloatRange{0, 1},
-		ServiceUnregisterHaltChance:       FloatRange{0, 1},
-		ServiceUnregisterUnexpectedChance: FloatRange{0, 1},
+		StateCheckChance: FloatRange{0, 1},
 	}
 
 	iterDur := dur / time.Duration(fuzzMetaRolls)

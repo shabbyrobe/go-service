@@ -8,7 +8,6 @@ import (
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/go-service/servicemgr"
 	"github.com/shabbyrobe/golib/assert"
 )
 
@@ -16,15 +15,15 @@ func TestHTTP(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	bts := []byte("yep")
-	h := NewHTTP("http", &http.Server{
+	h := NewHTTP(&http.Server{
 		Addr: ":0",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Write(bts)
 		}),
 	})
 
-	ender := servicemgr.NewEndListener(1)
-	runner := service.NewRunner(ender)
+	ender := service.NewEndListener(1)
+	runner := service.NewRunner(service.RunnerOnEnd(ender.OnServiceEnd))
 	defer runner.Shutdown(1*time.Second, 0)
 	tt.MustOK(runner.StartWait(1*time.Second, h))
 

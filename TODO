@@ -4,9 +4,11 @@
 - Tests for testing machinery. It's getting that way.
 - Nice formatting for metafuzz insanity params
 - Metafuzz parameters from an input argument
-- Fuzz servicemgr with more scenarios
 - Document usage patterns
 - fuzzer runnerWithFailingStart chance
+- runner fuzzer service count should be reduced by onEnd
+- re-add service state changer
+  - make dummy service registry in serviceutil to validate that it's possible
 
 
 panic: runnerState should not be nil!

@@ -1,3 +1,7 @@
+// +build ignore
+
+// FIXME: still stuck to v1's API
+
 package serviceutil
 
 import (
@@ -7,8 +11,6 @@ import (
 
 	"github.com/pkg/errors"
 	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/go-service/servicemgr"
-	"go.uber.org/zap"
 )
 
 // TimedRestart is an experimental service.Wrapper that restarts a service that
@@ -103,10 +105,8 @@ func (t *TimedRestart) suspendedWait() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	for atomic.LoadInt32(&t.suspended) == 1 {
-		zap.L().Debug("timed restart suspended")
 		t.suspend.Wait()
 	}
-	zap.L().Debug("timed restart active")
 }
 
 func (t *TimedRestart) Run(ctx service.Context) error {
@@ -130,7 +130,7 @@ func (t *TimedRestart) Run(ctx service.Context) error {
 		return nil
 	}
 
-	ender := servicemgr.NewEndListener(1)
+	ender := service.NewEndListener(1)
 
 	contexts := make(chan timedRun, 1)
 

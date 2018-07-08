@@ -1,15 +1,12 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 )
-
-// closed will return a permanently closed channel. It allows <-Ready()
-// to be called multiple times for a completed signal that can't be re-used.
-var closed = make(chan error)
 
 var errSignalCancelled = errors.New("service: ready cancelled")
 var errUsedDoneSignal = errors.New("service: tried to add to a done signal")
@@ -17,22 +14,13 @@ var errUsedDoneSignal = errors.New("service: tried to add to a done signal")
 func IsErrSignalCancelled(err error) bool { return err == errSignalCancelled }
 func IsErrUsedDoneSignal(err error) bool  { return err == errUsedDoneSignal }
 
-func init() {
-	close(closed)
-}
-
-type ReadySignal interface {
+type Signal interface {
 	Done(err error) (ok bool)
-	Cancel()
-
-	// Ready returns a channel that yields a nil when the service is ready,
-	// or an error when the service has failed to become ready. Use WhenReady
-	// to wait for this with a timeout.
-	Ready() <-chan error
+	Waiter() <-chan error // FIXME: rename to Waiter()
 }
 
-// MultiReadySignal allows you to wait for multiple services to Start()
-// concurrently.
+// MultiSignal coalesces multiple signals into a single error yielded to
+// the Waiter().
 //
 // Much like a sync.WaitGroup, every call to Done() must be preceded by a call
 // to Add(1). Done() decrements the internal counter, which must not go below
@@ -44,50 +32,63 @@ type ReadySignal interface {
 //
 // Be careful calling Add() after calling Ready(). Probably just don't.
 //
-type MultiReadySignal interface {
-	ReadySignal
+type MultiSignal interface {
+	Signal
 
-	// You may not call Add() on a MultiReadySignal that has yielded to its
-	// Ready() channel. This will cause a panic.
+	// You may not call Add() on a MultiSignal that has yielded to its Ready()
+	// channel. This will cause a panic.
 	Add(int)
-
-	Start(Runner, Service) error
 }
 
-func NewReadySignal() ReadySignal {
-	return &singleReadySignal{
+func AwaitSignal(context context.Context, r Signal) error {
+	select {
+	case err := <-r.Waiter():
+		return err
+	case <-context.Done():
+		return context.Err()
+	}
+}
+
+func AwaitSignalTimeout(timeout time.Duration, signal Signal) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return AwaitSignal(ctx, signal)
+}
+
+const (
+	signalUnused    int32 = 0
+	signalCancelled int32 = 1
+	signalDone      int32 = 2
+)
+
+type signal struct {
+	c         chan error
+	state     int32
+	signalled int32
+}
+
+func NewSignal() Signal {
+	return &signal{
 		c: make(chan error, 1),
 	}
 }
 
-func NewMultiReadySignal(expected int) MultiReadySignal {
-	ms := &multiReadySignal{
-		expected: expected,
+func (ss *signal) Done(err error) (ok bool) {
+	if !atomic.CompareAndSwapInt32(&ss.state, signalUnused, signalDone) {
+		return false
 	}
-	ms.cond = sync.NewCond(&ms.lock)
-	return ms
+	ss.c <- err
+	return true
 }
 
-func WhenReady(timeout time.Duration, r ReadySignal) error {
-	errc := make(chan error, 1)
-	go func() {
-		errc <- <-r.Ready()
-	}()
-
-	var after <-chan time.Time
-	if timeout > 0 {
-		after = time.After(timeout)
+func (ss *signal) Waiter() <-chan error {
+	if !atomic.CompareAndSwapInt32(&ss.signalled, 0, 1) {
+		return closed
 	}
-	select {
-	case err := <-errc:
-		return err
-	case <-after:
-		r.Cancel()
-		return errWaitTimeout(0)
-	}
+	return ss.c
 }
 
-type multiReadySignal struct {
+type multiSignal struct {
 	expected int
 	done     bool
 	buffer   []error
@@ -95,52 +96,60 @@ type multiReadySignal struct {
 	cond     *sync.Cond
 }
 
-func (ms *multiReadySignal) Start(r Runner, s Service) error {
-	ms.Add(1)
-	return r.Start(s, ms)
+func NewMultiSignal(expected int) MultiSignal {
+	ms := &multiSignal{
+		expected: expected,
+	}
+	ms.cond = sync.NewCond(&ms.lock)
+	return ms
 }
 
-func (ms *multiReadySignal) Cancel() {
+func (ms *multiSignal) Cancel() {
 	ms.lock.Lock()
-	defer ms.lock.Unlock()
 	if ms.done {
+		ms.lock.Unlock()
 		return
 	}
 	ms.expected = 0
 	ms.buffer = []error{errSignalCancelled}
 	ms.cond.Broadcast()
+	ms.lock.Unlock()
 }
 
-func (ms *multiReadySignal) Add(n int) {
+func (ms *multiSignal) Add(n int) {
 	ms.lock.Lock()
-	defer ms.lock.Unlock()
 	if ms.done {
+		ms.lock.Unlock()
 		panic(errUsedDoneSignal)
 	}
 	if n <= 0 {
+		ms.lock.Unlock()
 		panic("service: Add must be > 0")
 	}
 	ms.expected += n
+	ms.lock.Unlock()
 }
 
-func (ms *multiReadySignal) Done(err error) (ok bool) {
+func (ms *multiSignal) Done(err error) (ok bool) {
 	ms.lock.Lock()
-	defer ms.lock.Unlock()
 	if ms.done {
+		ms.lock.Unlock()
 		return false
 	}
 
 	ms.expected--
 	if ms.expected < 0 {
+		ms.lock.Unlock()
 		panic("negative expected count")
 	}
 
 	ms.buffer = append(ms.buffer, err)
 	ms.cond.Broadcast()
+	ms.lock.Unlock()
 	return true
 }
 
-func (ms *multiReadySignal) Ready() <-chan error {
+func (ms *multiSignal) Waiter() <-chan error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 
@@ -176,37 +185,4 @@ func (ms *multiReadySignal) Ready() <-chan error {
 	}()
 
 	return c
-}
-
-const (
-	signalUnused    int32 = 0
-	signalCancelled int32 = 1
-	signalDone      int32 = 2
-)
-
-type singleReadySignal struct {
-	c           chan error
-	state       int32
-	readyCalled int32
-}
-
-func (ss *singleReadySignal) Cancel() {
-	if atomic.CompareAndSwapInt32(&ss.state, signalUnused, signalCancelled) {
-		ss.c <- errSignalCancelled
-	}
-}
-
-func (ss *singleReadySignal) Done(err error) (ok bool) {
-	if !atomic.CompareAndSwapInt32(&ss.state, signalUnused, signalDone) {
-		return false
-	}
-	ss.c <- err
-	return true
-}
-
-func (ss *singleReadySignal) Ready() <-chan error {
-	if !atomic.CompareAndSwapInt32(&ss.readyCalled, 0, 1) {
-		return closed
-	}
-	return ss.c
 }

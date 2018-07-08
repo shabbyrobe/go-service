@@ -1,6 +1,7 @@
 package servicetest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,12 +23,6 @@ func mustStateError(tt assert.T, err error, expected service.State, current serv
 	tt.MustAssert(
 		strings.Contains(err.Error(), expstr),
 		fmt.Sprintf("assertion failed: expected %q, found %q", expstr, err.Error()))
-}
-
-func mustStateErrorUnknown(tt assert.T, err error) {
-	tt.Helper()
-	tt.MustAssert(err != nil, "state error not found")
-	tt.MustAssert(service.IsErrServiceUnknown(err), err)
 }
 
 func mustRecv(tt assert.T, waiter Waiter, timeout time.Duration) {
@@ -59,19 +54,22 @@ func TestRunnerStartWait(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	for i := 0; i < 5; i++ {
-		tt.MustOK(service.StartWait(r, dto, s1))
-		tt.MustAssert(r.State(s1) == service.Started)
+		svc := service.New("", s1)
+		tt.MustOK(service.StartWaitTimeout(dto, r, svc))
+		tt.MustAssert(r.State(svc) == service.Started)
 
-		mustStateError(tt, service.StartWait(r, dto, s1), service.Halted, service.Started)
+		h, err := service.StartWaitTimeout(dto, r, svc)
+		mustStateError(tt, err, service.Halted, service.Started)
 
-		tt.MustOK(r.Halt(dto, s1))
-		tt.MustAssert(r.State(s1) == service.Halted)
+		tt.MustOK(h.HaltWaitTimeout(dto))
+		tt.MustAssert(r.State(svc) == service.Halted)
 
-		herr := r.Halt(dto, s1)
-		tt.MustAssert(service.IsErrServiceUnknown(herr), herr)
+		// Halting a second time should yield the same result:
+		tt.MustOK(h.HaltWaitTimeout(dto))
+		tt.MustAssert(r.State(svc) == service.Halted)
 	}
 }
 
@@ -84,18 +82,22 @@ func TestRunnerStart(t *testing.T) {
 	// This is a brittle test - we could use OnServiceState to help block
 	// the service until Starting has been checked.
 	s1 := (&BlockingService{StartDelay: 2 * tscale}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
-	rdy := service.NewReadySignal()
-	tt.MustOK(r.Start(s1, rdy))
-	tt.MustAssert(r.State(s1) == service.Starting)
-	mustStateError(tt, r.Start(s1, rdy), service.Halted, service.Starting)
+	svc := service.New("", s1)
 
-	tt.MustOK(service.WhenReady(dto, rdy))
-	tt.MustAssert(r.State(s1) == service.Started)
+	rdy := service.NewSignal()
+	tt.MustOK(r.Start(nil, svc, rdy))
+	tt.MustAssert(r.State(svc) == service.Starting)
 
-	tt.MustOK(r.Halt(dto, s1))
-	tt.MustAssert(r.State(s1) == service.Halted)
+	h, err := r.Start(nil, svc, rdy)
+	mustStateError(tt, err, service.Halted, service.Starting)
+
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
+	tt.MustAssert(r.State(svc) == service.Started)
+
+	tt.MustOK(h.HaltWaitTimeout(dto))
+	tt.MustAssert(r.State(svc) == service.Halted)
 }
 
 func TestEnsureHalt(t *testing.T) {
@@ -103,29 +105,32 @@ func TestEnsureHalt(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := (&BlockingService{}).Init()
+	sr1 := (&BlockingService{}).Init()
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 
-	tt.MustOK(service.StartWait(r, dto, s1))
+	s1 := service.New("", sr1)
+
+	h1, err := service.StartWaitTimeout(dto, r, s1)
+	tt.MustOK(err)
 	tt.MustAssert(r.State(s1) == service.Started)
 
-	// Unlike runner.Halt(), an arbitrary number of calls to EnsureHalted
-	// should be OK
-	tt.MustOK(service.EnsureHalt(r, dto, s1))
-	tt.MustOK(service.EnsureHalt(r, dto, s1))
-	tt.MustOK(service.EnsureHalt(r, dto, s1))
+	// an arbitrary number of calls to HaltWaitTimeout should be OK:
+	tt.MustOK(service.HaltWaitTimeout(dto, r, s1))
+	tt.MustOK(service.HaltWaitTimeout(dto, r, s1))
+	tt.MustOK(service.HaltWaitTimeout(dto, r, s1))
 
-	herr := r.Halt(dto, s1)
-	tt.MustAssert(service.IsErrServiceUnknown(herr), herr)
+	herr := h1.HaltWaitTimeout(dto)
+	tt.MustOK(herr)
 
 	// runTime must be long enough to ensure that EnsureHalt times out
-	s2 := (&UnhaltableService{}).Init()
+	sr2 := (&UnhaltableService{}).Init()
+	s2 := service.New("", sr2)
 	e2 := lc.EndWaiter(s2, 1)
-	tt.MustOK(service.StartWait(r, dto, s2))
-	err := service.EnsureHalt(r, 1*time.Nanosecond, s2) // 1ns is the shortest possible timeout; 0 means wait forever
-	tt.MustAssert(service.IsErrHaltTimeout(err), err)
-	close(s2.halt)
+	h2, err := service.StartWaitTimeout(dto, r, s2)
+	tt.MustOK(err)
+	tt.MustEqual(context.Canceled, h2.HaltWaitTimeout(1*time.Nanosecond))
+	close(sr2.halt)
 	mustRecv(tt, e2, dto)
 }
 
@@ -134,21 +139,22 @@ func TestRunnerSameServiceMultipleRunners(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := (&BlockingService{StartDelay: 2 * tscale}).Init()
-	r1 := service.NewRunner(NewNullListenerFull())
-	r2 := service.NewRunner(NewNullListenerFull())
+	sr1 := (&BlockingService{StartDelay: 2 * tscale}).Init()
+	s1 := service.New("", sr1)
+	r1 := service.NewRunner()
+	r2 := service.NewRunner()
 
-	rdy1, rdy2 := service.NewReadySignal(), service.NewReadySignal()
-	tt.MustOK(r1.Start(s1, rdy1))
-	tt.MustOK(r2.Start(s1, rdy2))
+	rdy1, rdy2 := service.NewSignal(), service.NewSignal()
+	tt.MustOK(r1.Start(nil, s1, rdy1))
+	tt.MustOK(r2.Start(nil, s1, rdy2))
 	tt.MustAssert(r1.State(s1) == service.Starting)
 	tt.MustAssert(r2.State(s1) == service.Starting)
-	tt.MustOK(service.WhenReady(dto, rdy1))
-	tt.MustOK(service.WhenReady(dto, rdy2))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy1))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy2))
 	tt.MustAssert(r1.State(s1) == service.Started)
 	tt.MustAssert(r2.State(s1) == service.Started)
-	tt.MustOK(r1.Halt(dto, s1))
-	tt.MustOK(r2.Halt(dto, s1))
+	tt.MustOK(service.HaltWaitTimeout(dto, r1, s1))
+	tt.MustOK(service.HaltWaitTimeout(dto, r2, s1))
 	tt.MustAssert(r1.State(s1) == service.Halted)
 	tt.MustAssert(r2.State(s1) == service.Halted)
 }
@@ -158,16 +164,17 @@ func TestRunnerStartMultiple(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := (&BlockingService{}).Init()
-	s2 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	sr1 := (&BlockingService{}).Init()
+	sr2 := (&BlockingService{}).Init()
+	s1, s2 := service.New("", sr1), service.New("", sr2)
+	r := service.NewRunner()
 
-	mr := service.NewMultiReadySignal(2)
-	tt.MustOK(r.Start(s1, mr))
-	tt.MustOK(r.Start(s2, mr))
-	tt.MustOK(service.WhenReady(dto, mr))
-	tt.MustOK(r.Halt(dto, s1))
-	tt.MustOK(r.Halt(dto, s2))
+	mr := service.NewMultiSignal(2)
+	tt.MustOK(r.Start(nil, s1, mr))
+	tt.MustOK(r.Start(nil, s2, mr))
+	tt.MustOK(service.AwaitSignalTimeout(dto, mr))
+	tt.MustOK(service.HaltWaitTimeout(dto, r, s1))
+	tt.MustOK(service.HaltWaitTimeout(dto, r, s2))
 }
 
 func TestRunnerStartServiceEnds(t *testing.T) {
@@ -175,13 +182,13 @@ func TestRunnerStartServiceEnds(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	s1 := (&TimedService{}).Init() // service should end immediately after it is started.
+	s1 := service.New("", (&TimedService{}).Init()) // service should end immediately after it is started.
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	ew := lc.EndWaiter(s1, 1)
 
-	tt.MustOK(r.Start(s1, nil))
+	tt.MustOK(r.Start(nil, s1, nil))
 	mustRecv(tt, ew, dto)
 	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageRun, Err: service.ErrServiceEnded}}, lc.Ends(s1))
 }
@@ -192,27 +199,28 @@ func TestRunnerStartWaitErrorBeforeReady(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	serr := errors.New("1")
-	s1 := (&TimedService{StartFailure: serr}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	s1 := service.New("", (&TimedService{StartFailure: serr}).Init())
+	r := service.NewRunner()
 
-	tt.MustEqual(serr, cause(service.StartWait(r, dto, s1)))
+	_, err := service.StartWaitTimeout(dto, r, s1)
+	tt.MustEqual(serr, cause(err))
 }
 
-func TestRunnerStartErrorBeforeReadyIsReturnedByWhenReady(t *testing.T) {
+func TestRunnerStartErrorBeforeReadyIsReturnedByAwaitSignalTimeout(t *testing.T) {
 	t.Parallel()
 
 	tt := assert.WrapTB(t)
 
 	serr := errors.New("fail")
-	s1 := (&TimedService{StartFailure: serr}).Init()
+	s1 := service.New("", (&TimedService{StartFailure: serr}).Init())
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	endc := lc.EndWaiter(s1, 1)
 
-	rdy := service.NewReadySignal()
-	tt.MustOK(r.Start(s1, rdy))
-	result := cause(service.WhenReady(dto, rdy))
+	rdy := service.NewSignal()
+	tt.MustOK(r.Start(nil, s1, rdy))
+	result := cause(service.AwaitSignalTimeout(dto, rdy))
 	tt.MustAssert(result != nil)
 	tt.MustEqual(serr, result)
 
@@ -226,14 +234,14 @@ func TestRunnerStartFailureBeforeReadyPassedToSignal(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	serr := errors.New("start failure")
-	s1 := (&TimedService{StartFailure: serr}).Init()
+	s1 := service.New("", (&TimedService{StartFailure: serr}).Init())
 	lc := NewListenerCollector()
-	rn := service.NewRunner(lc)
+	rn := service.NewRunner(lc.RunnerOptions()...)
 	ew := lc.EndWaiter(s1, 1)
 
-	rdy := service.NewReadySignal()
-	tt.MustOK(rn.Start(s1, rdy))
-	tt.MustEqual(serr, cause(service.WhenReady(dto, rdy)))
+	rdy := service.NewSignal()
+	tt.MustOK(rn.Start(nil, s1, rdy))
+	tt.MustEqual(serr, cause(service.AwaitSignalTimeout(dto, rdy)))
 
 	// The start error should be passed to the listener as well
 	mustRecv(tt, ew, dto)
@@ -249,7 +257,7 @@ func TestRunnerStartFailureBeforeReadyPassedToListenerWhenSignalIsNil(t *testing
 
 	s1 := (&TimedService{StartFailure: serr}).Init()
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(r.Start(s1, nil))
@@ -264,7 +272,7 @@ func TestRunnerStartWaitServiceEndsAfterReady(t *testing.T) {
 
 	s1 := (&TimedService{RunTime: 10 * time.Millisecond}).Init() // should return immediately
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(service.StartWait(r, dto, s1))
@@ -280,7 +288,7 @@ func TestRunnerStartWaitServiceEndsBeforeReady(t *testing.T) {
 	e1 := errors.New("e1")
 	s1 := (&TimedService{StartFailure: e1}).Init() // should return immediately
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 
 	tt.MustEqual(e1, cause(service.StartWait(r, dto, s1)))
 }
@@ -294,18 +302,18 @@ func TestRunnerStartFirstRegisteredThenStartSecondAfterFirstEnds(t *testing.T) {
 	s2 := (&BlockingService{}).Init()
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	_ = r.Register(s1)
 
 	ew1 := lc.EndWaiter(s1, 1)
 	ew2 := lc.EndWaiter(s2, 1)
 
-	mr := service.NewMultiReadySignal(2)
+	mr := service.NewMultiSignal(2)
 	tt.MustOK(r.Start(s1, mr))
 	mustRecv(tt, ew1, dto)
 
 	tt.MustOK(r.Start(s2, mr))
-	tt.MustOK(service.WhenReady(1*time.Second, mr))
+	tt.MustOK(service.AwaitSignalTimeout(1*time.Second, mr))
 	mustStateError(tt, r.Halt(dto, s1), haltableStates, service.Halted)
 
 	tt.MustOK(r.Halt(dto, s2))
@@ -321,17 +329,17 @@ func TestRunnerStartFirstUnregisteredThenStartSecondAfterFirstEnds(t *testing.T)
 	s2 := (&BlockingService{}).Init()
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 
 	ew1 := lc.EndWaiter(s1, 1)
 	ew2 := lc.EndWaiter(s2, 1)
 
-	mr := service.NewMultiReadySignal(2)
+	mr := service.NewMultiSignal(2)
 	tt.MustOK(r.Start(s1, mr))
 	mustRecv(tt, ew1, dto)
 
 	tt.MustOK(r.Start(s2, mr))
-	tt.MustOK(service.WhenReady(1*time.Second, mr))
+	tt.MustOK(service.AwaitSignalTimeout(1*time.Second, mr))
 	mustStateErrorUnknown(tt, r.Halt(dto, s1))
 
 	tt.MustOK(r.Halt(dto, s2))
@@ -350,7 +358,7 @@ func TestRunnerStartWaitFirstRegisteredThenStartSecondAfterFirstEnds(t *testing.
 	s2 := (&BlockingService{}).Init()
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	_ = r.Register(s1)
 
 	ew1 := lc.EndWaiter(s1, 1)
@@ -359,9 +367,9 @@ func TestRunnerStartWaitFirstRegisteredThenStartSecondAfterFirstEnds(t *testing.
 	tt.MustOK(service.StartWait(r, dto, s1))
 	mustRecv(tt, ew1, dto)
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s2, rdy))
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 	mustStateError(tt, r.Halt(dto, s1), haltableStates, service.Halted)
 
 	tt.MustOK(r.Halt(dto, s2))
@@ -380,7 +388,7 @@ func TestRunnerStartWaitFirstUnregisteredThenStartSecondAfterFirstEnds(t *testin
 	s2 := (&BlockingService{}).Init()
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 
 	ew1 := lc.EndWaiter(s1, 1)
 	ew2 := lc.EndWaiter(s2, 1)
@@ -388,9 +396,9 @@ func TestRunnerStartWaitFirstUnregisteredThenStartSecondAfterFirstEnds(t *testin
 	tt.MustOK(service.StartWait(r, dto, s1))
 	mustRecv(tt, ew1, dto)
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s2, rdy))
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 	mustStateErrorUnknown(tt, r.Halt(dto, s1))
 
 	tt.MustOK(r.Halt(dto, s2))
@@ -403,12 +411,12 @@ func TestRunnerReadyTimeout(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{StartDelay: 5 * tscale}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s1, rdy))
 	tt.MustAssert(r.State(s1) == service.Starting)
-	tt.MustAssert(service.IsErrWaitTimeout(service.WhenReady(1*tscale, rdy)))
+	tt.MustAssert(service.IsErrWaitTimeout(service.AwaitSignalTimeout(1*tscale, rdy)))
 	tt.MustOK(r.Halt(dto, s1))
 	tt.MustAssert(r.State(s1) == service.Halted)
 }
@@ -419,7 +427,7 @@ func TestRunnerStartHaltWhileInStartDelay(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{StartDelay: 2 * tscale}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(r.Start(s1, nil))
 	tt.MustOK(r.Halt(dto, s1))
@@ -431,7 +439,7 @@ func TestRunnerStartHaltImmediately(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	s1 := (&BlockingService{}).Init()
 	tt.MustOK(r.Start(s1, nil))
@@ -444,13 +452,13 @@ func TestRunnerStartHaltImmediatelyWithReady(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	s1 := (&BlockingService{}).Init()
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s1, rdy))
 	tt.MustOK(r.Halt(dto, s1))
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 	tt.MustAssert(r.State(s1) == service.Halted)
 }
 
@@ -459,7 +467,7 @@ func TestRunnerStartShutdownImmediately(t *testing.T) {
 
 	tt := assert.WrapTB(t)
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	s1 := (&BlockingService{}).Init()
 	tt.MustOK(r.Start(s1, nil))
@@ -474,7 +482,7 @@ func TestRunnerStartDelay(t *testing.T) {
 
 	delay := 2 * tscale
 	s1 := (&BlockingService{StartDelay: delay}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tm := time.Now()
 	tt.MustOK(service.StartWait(r, dto, s1))
@@ -490,7 +498,7 @@ func TestRunnerHaltDelay(t *testing.T) {
 
 	delay := 2 * tscale
 	s1 := (&BlockingService{HaltDelay: delay}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r, dto, s1))
 
@@ -507,7 +515,7 @@ func TestRunnerHaltingState(t *testing.T) {
 
 	delay := 20 * tscale
 	s1 := (&BlockingService{HaltDelay: delay}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r, dto, s1))
 
@@ -524,7 +532,7 @@ func TestRunnerHaltingState(t *testing.T) {
 				return
 			}
 			state := r.State(s1)
-			if err := r.service.WhenReady(dto, s1); err != nil {
+			if err := r.service.AwaitSignalTimeout(dto, s1); err != nil {
 				panic(err)
 			}
 			counts[state]++
@@ -546,7 +554,7 @@ func TestRunnerRegisterMultiple(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r.Register(s1).Register(s1), dto, s1))
 	tt.MustEqual(1, len(r.Services(service.FindRegistered, 0)))
@@ -567,7 +575,7 @@ func TestRunnerUnregister(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r.Register(s1), dto, s1))
 	tt.MustOK(r.Halt(dto, s1))
@@ -585,7 +593,7 @@ func TestRunnerUnregisterWhileNotHalted(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	s1 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r.Register(s1), dto, s1))
 	tt.MustEqual(0, len(r.Services(service.FindUnregistered, 0)))
@@ -608,7 +616,7 @@ func TestHaltableSleep(t *testing.T) {
 	// to make sure we use the channel-based version of the sleep
 	// function
 	s1 := (&TimedService{RunTime: service.MinHaltableSleep}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r, dto, s1))
 	tm := time.Now()
@@ -689,7 +697,7 @@ func TestRunnerShutdown(t *testing.T) {
 
 	s1 := (&BlockingService{}).Init()
 	s2 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustOK(service.StartWait(r, dto, s1))
 	tt.MustOK(service.StartWait(r, dto, s2))
@@ -705,7 +713,7 @@ func TestRunnerServices(t *testing.T) {
 	s1 := (&BlockingService{}).Init()
 	s2 := (&BlockingService{}).Init()
 	s3 := (&BlockingService{}).Init()
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
 	tt.MustEqual(0, len(r.Services(service.AnyState, 0)))
 
@@ -748,16 +756,16 @@ func TestRunnerServiceFunc(t *testing.T) {
 		return nil
 	})
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s1, rdy))
 	tt.MustEqual(service.Starting, r.State(s1))
 	mustStateError(tt, r.Start(s1, rdy), service.Halted, service.Starting)
 
 	close(ready)
 
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 	tt.MustOK(r.Halt(dto, s1))
 }
 
@@ -784,16 +792,16 @@ func TestRunnerServiceWithHaltingGoroutines(t *testing.T) {
 		return nil
 	})
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s1, rdy))
 	tt.MustEqual(service.Starting, r.State(s1))
 	mustStateError(tt, r.Start(s1, rdy), service.Halted, service.Starting)
 
 	close(ready)
 
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 	tt.MustOK(r.Halt(dto, s1))
 
 	select {
@@ -830,16 +838,16 @@ func TestRunnerServiceWithHaltingGoroutinesOnEndError(t *testing.T) {
 		return fmt.Errorf("nup")
 	})
 
-	r := service.NewRunner(NewNullListenerFull())
+	r := service.NewRunner()
 
-	rdy := service.NewReadySignal()
+	rdy := service.NewSignal()
 	tt.MustOK(r.Start(s1, rdy))
 	tt.MustEqual(service.Starting, r.State(s1))
 	mustStateError(tt, r.Start(s1, rdy), service.Halted, service.Starting)
 
 	close(ready)
 
-	tt.MustOK(service.WhenReady(dto, rdy))
+	tt.MustOK(service.AwaitSignalTimeout(dto, rdy))
 
 	select {
 	case <-yep:
@@ -871,7 +879,7 @@ func TestRunnerServiceEndedNotRetained(t *testing.T) {
 	s1 := (&TimedService{}).Init() // should return immediately
 
 	lc := NewListenerCollector()
-	r := service.NewRunner(lc)
+	r := service.NewRunner(lc.RunnerOptions()...)
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(r.Start(s1, nil))
@@ -900,7 +908,7 @@ func TestRunnerHaltWhileStarting(t *testing.T) {
 			startDelay := 10 * tscale
 			s1 := (&BlockingService{StartDelay: startDelay}).Init()
 			lc := NewListenerCollector()
-			r := service.NewRunner(lc)
+			r := service.NewRunner(lc.RunnerOptions()...)
 
 			tt.MustOK(r.Start(s1, nil))
 			tt.MustAssert(r.State(s1) == service.Starting)
@@ -932,7 +940,7 @@ func TestRunnerHaltWhileHalting(t *testing.T) {
 			haltDelay := 10 * tscale
 			s1 := (&BlockingService{HaltDelay: haltDelay}).Init()
 			lc := NewListenerCollector()
-			r := service.NewRunner(lc)
+			r := service.NewRunner(lc.RunnerOptions()...)
 
 			tt.MustOK(service.StartWait(r, dto, s1))
 			tt.MustAssert(r.State(s1) == service.Started)
@@ -982,7 +990,7 @@ func TestRunnerHaltOverlap(t *testing.T) {
 			haltDelay := 10 * tscale
 			s1 := (&BlockingService{HaltDelay: haltDelay}).Init()
 			lc := NewListenerCollector()
-			r := service.NewRunner(lc)
+			r := service.NewRunner(lc.RunnerOptions()...)
 
 			tt.MustOK(service.StartWait(r, dto, s1))
 			tt.MustAssert(r.State(s1) == service.Started)

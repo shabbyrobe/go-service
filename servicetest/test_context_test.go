@@ -1,3 +1,5 @@
+// +build ignore
+
 package servicetest
 
 import (
@@ -11,24 +13,6 @@ import (
 	service "github.com/shabbyrobe/go-service"
 	"github.com/shabbyrobe/golib/assert"
 )
-
-func TestContextStandalone(t *testing.T) {
-	tt := assert.WrapTB(t)
-	_ = tt
-
-	c := service.Standalone()
-	s := (&BlockingService{}).Init()
-
-	end := make(chan struct{})
-	go func() {
-		defer close(end)
-		if err := s.Run(c); err != nil {
-			panic(err)
-		}
-	}()
-	c.Halt()
-	<-end
-}
 
 func TestContextWithCancelStopsOnHalt(t *testing.T) {
 	tt := assert.WrapTB(t)

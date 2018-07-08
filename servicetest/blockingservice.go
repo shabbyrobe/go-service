@@ -10,7 +10,6 @@ import (
 // BlockingService is a testing service that does no work, but blocks until it
 // is Halted.
 type BlockingService struct {
-	Name         service.Name
 	StartFailure error
 	StartLimit   int
 	StartDelay   time.Duration
@@ -27,13 +26,8 @@ func (d *BlockingService) Halts() int  { return int(atomic.LoadInt32(&d.halts)) 
 
 func (d *BlockingService) Init() *BlockingService {
 	d.init = true
-	if d.Name == "" {
-		d.Name.AppendUnique()
-	}
 	return d
 }
-
-func (d *BlockingService) ServiceName() service.Name { return d.Name }
 
 func (d *BlockingService) Run(ctx service.Context) error {
 	if !d.init {

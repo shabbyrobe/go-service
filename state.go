@@ -1,25 +1,41 @@
 package service
 
-import (
-	"fmt"
+type Stage int
+
+const (
+	StageReady Stage = 1
+	StageRun   Stage = 2
 )
+
+type RunnerState int
+
+const (
+	RunnerEnabled   RunnerState = 0
+	RunnerSuspended RunnerState = 1
+	RunnerShutdown  RunnerState = 2
+)
+
+type State int
 
 // State should not be used as a flag by external consumers of this package.
 const (
-	NoState State = 0
-	Halting State = 1 << iota
-	Halted
+	NoState  State = 0
+	AnyState State = 0 // AnyState is a symbolic name used to make queries more readable.
+	Halted   State = 1 << iota
 	Starting
 	Started
+	Halting
+	Ended
+
+	Running    = Starting | Started | Halting
+	NotRunning = NoState | Halted | Ended
 )
 
 var States = []State{Halting, Halted, Starting, Started}
 
-type State int
-
 func (s State) IsRunning() bool { return s == Starting || s == Started }
 
-func (s State) String() string {
+func (s State) name() string {
 	switch s {
 	case Halted:
 		return "halted"
@@ -27,81 +43,32 @@ func (s State) String() string {
 		return "starting"
 	case Started:
 		return "started"
-	case Started | Starting:
-		return "started or starting"
-	case Started | Starting | Halting:
-		return "started, starting or halting"
 	case Halting:
 		return "halting"
-	default:
-		return "(unknown)"
+	case Ended:
+		return "ended"
 	}
+	return ""
 }
 
-func (s State) validFrom() State {
-	switch s {
-	case Starting:
-		return Halted
-	case Started:
-		return Starting
-	case Halting:
-		return Started | Starting | Halting
-	case Halted:
-		return Halting
-	default:
-		panic(fmt.Sprintf("invalid state %d", s))
-	}
-}
-
-func (s *State) set(next State) (last State, err error) {
-	from := next.validFrom()
-	sv := *s
-	if from&sv != sv {
-		return sv, &errState{from, next, sv}
-	}
-	*s = next
-	return sv, nil
-}
-
-type StateQuery int
-
-func (q StateQuery) Match(state State, registered bool) bool {
-	svcMatch := true
-	if q != AnyState && (q&(FindRunning|FindNotRunning) > 0) {
-		switch state {
-		case Halting:
-			svcMatch = q&FindHalting != 0
-		case Halted:
-			svcMatch = q&FindHalted != 0
-		case Starting:
-			svcMatch = q&FindStarting != 0
-		case Started:
-			svcMatch = q&FindStarted != 0
+func (s State) String() string {
+	out := s.name()
+	if out == "" {
+		out = "("
+		for i := Ended; i > 0; i >>= 1 {
+			if i != Ended {
+				out += " or "
+			}
+			out += s.name()
 		}
+		out += ")"
 	}
-
-	regMatch := false
-	findReg, findUnreg := (q&FindRegistered != 0), (q&FindUnregistered != 0)
-	if (findReg && registered) || (findUnreg && !registered) {
-		regMatch = true
-	} else if !findReg && !findUnreg {
-		regMatch = true
-	}
-
-	return svcMatch && regMatch
+	return out
 }
 
-const (
-	AnyState StateQuery = 0
-
-	FindHalted StateQuery = 1 << iota
-	FindStarting
-	FindStarted
-	FindHalting
-
-	FindRegistered
-	FindUnregistered
-
-	FindRunning    = FindStarting | FindStarted
-	FindNotRunning = FindHalting | FindHalted
-)
+func (s State) Match(q State) bool {
+	if q == AnyState {
+		return true
+	}
+	return q&s == q
+}

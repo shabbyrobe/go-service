@@ -1,9 +1,9 @@
-package servicemgr
-
-import service "github.com/shabbyrobe/go-service"
+package service
 
 // FailureListener provides a channel that emits errors when services end
 // unexpectedly.
+//
+// WARNING: this API is not stable.
 //
 // If the failure channel would block, errors are discarded.
 //
@@ -16,7 +16,7 @@ type FailureListener struct {
 	failures chan error
 }
 
-var _ service.Listener = &FailureListener{}
+var _ OnEnd = (&FailureListener{}).OnEnd
 
 func NewFailureListener(cap int) *FailureListener {
 	if cap < 1 {
@@ -51,7 +51,7 @@ func (f *FailureListener) Send(err error) {
 	}
 }
 
-func (f *FailureListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
+func (f *FailureListener) OnEnd(stage Stage, service *Service, err error) {
 	if err != nil {
 		select {
 		case f.failures <- err:
@@ -62,6 +62,8 @@ func (f *FailureListener) OnServiceEnd(stage service.Stage, service service.Serv
 
 // EndListener provides a channel that emits errors when services end
 // unexpectedly, and nil when they end expectedly.
+//
+// WARNING: this API is not stable.
 //
 // If the ends channel would block, items are discarded.
 //
@@ -74,7 +76,7 @@ type EndListener struct {
 	ends chan error
 }
 
-var _ service.Listener = &EndListener{}
+var _ OnEnd = (&EndListener{}).OnEnd
 
 func NewEndListener(cap int) *EndListener {
 	if cap < 1 {
@@ -109,7 +111,7 @@ func (e *EndListener) SendNonNil(err error) {
 	}
 }
 
-func (e *EndListener) OnServiceEnd(stage service.Stage, service service.Service, err service.Error) {
+func (e *EndListener) OnEnd(stage Stage, service *Service, err error) {
 	select {
 	case e.ends <- err:
 	default:

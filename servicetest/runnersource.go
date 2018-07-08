@@ -1,16 +1,18 @@
 package servicetest
 
-import (
-	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/go-service/servicemgr"
-)
+import service "github.com/shabbyrobe/go-service"
+
+type Listener interface {
+	OnServiceEnd() service.OnEnd
+	OnServiceError() service.OnError
+}
 
 type RunnerSource interface {
 	CanHaltRunner() bool
 	CanCreateRunner() bool
 
-	FirstRunner(l service.Listener) service.Runner
-	CreateRunner(l service.Listener) service.Runner
+	FirstRunner(l Listener) service.Runner
+	CreateRunner(l Listener) service.Runner
 
 	End()
 }
@@ -20,31 +22,25 @@ type ServiceRunnerSource struct{}
 func (srs *ServiceRunnerSource) CanCreateRunner() bool { return true }
 func (srs *ServiceRunnerSource) CanHaltRunner() bool   { return true }
 
-func (srs *ServiceRunnerSource) FirstRunner(l service.Listener) service.Runner {
-	return service.NewRunner(l)
+func (srs *ServiceRunnerSource) FirstRunner(l Listener) service.Runner {
+	return srs.newRunner(l)
 }
 
-func (srs *ServiceRunnerSource) CreateRunner(l service.Listener) service.Runner {
-	return service.NewRunner(l)
+func (srs *ServiceRunnerSource) CreateRunner(l Listener) service.Runner {
+	return srs.newRunner(l)
+}
+
+func (srs *ServiceRunnerSource) newRunner(l Listener) service.Runner {
+	var opts []service.RunnerOption
+	onEnd, onError := l.OnServiceEnd(), l.OnServiceError()
+
+	if onEnd != nil {
+		opts = append(opts, service.RunnerOnEnd(onEnd))
+	}
+	if onError != nil {
+		opts = append(opts, service.RunnerOnError(onError))
+	}
+	return service.NewRunner(opts...)
 }
 
 func (srs *ServiceRunnerSource) End() {}
-
-type ServiceManagerRunnerSource struct{}
-
-func (srs *ServiceManagerRunnerSource) CanCreateRunner() bool { return false }
-func (srs *ServiceManagerRunnerSource) CanHaltRunner() bool   { return false }
-
-func (srs *ServiceManagerRunnerSource) FirstRunner(l service.Listener) service.Runner {
-	servicemgr.Reset()
-	servicemgr.DefaultListener(l)
-	return &globalProxy{}
-}
-
-func (srs *ServiceManagerRunnerSource) CreateRunner(l service.Listener) service.Runner {
-	panic("can not create runner with this source")
-}
-
-func (srs *ServiceManagerRunnerSource) End() {
-	servicemgr.Reset()
-}

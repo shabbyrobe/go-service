@@ -25,17 +25,23 @@ type Waiter interface {
 // a test.
 //
 type ListenerCollector struct {
-	services map[service.Service]*listenerCollectorService
+	services map[*service.Service]*listenerCollectorService
 	lock     sync.Mutex
 }
 
 func NewListenerCollector() *ListenerCollector {
 	return &ListenerCollector{
-		services: make(map[service.Service]*listenerCollectorService),
+		services: make(map[*service.Service]*listenerCollectorService),
 	}
 }
 
-func (t *ListenerCollector) Errs(svc service.Service) (out []service.Error) {
+func (t *ListenerCollector) RunnerOptions(opts ...service.RunnerOption) []service.RunnerOption {
+	opts = append(opts, service.RunnerOnEnd(t.OnServiceEnd))
+	opts = append(opts, service.RunnerOnError(t.OnServiceError))
+	return opts
+}
+
+func (t *ListenerCollector) Errs(svc *service.Service) (out []error) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	lsvc := t.services[svc]
@@ -48,7 +54,7 @@ func (t *ListenerCollector) Errs(svc service.Service) (out []service.Error) {
 	return
 }
 
-func (t *ListenerCollector) Ends(svc service.Service) (out []ListenerCollectorEnd) {
+func (t *ListenerCollector) Ends(svc *service.Service) (out []ListenerCollectorEnd) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	lsvc := t.services[svc]
@@ -61,7 +67,7 @@ func (t *ListenerCollector) Ends(svc service.Service) (out []ListenerCollectorEn
 	return
 }
 
-func (t *ListenerCollector) EndWaiter(svc service.Service, cap int) Waiter {
+func (t *ListenerCollector) EndWaiter(svc *service.Service, cap int) Waiter {
 	// FIXME: endWaiter should have a timeout
 	t.lock.Lock()
 	if t.services[svc] == nil {
@@ -78,7 +84,7 @@ func (t *ListenerCollector) EndWaiter(svc service.Service, cap int) Waiter {
 	return w
 }
 
-func (t *ListenerCollector) ErrWaiter(svc service.Service, cap int) Waiter {
+func (t *ListenerCollector) ErrWaiter(svc *service.Service, cap int) Waiter {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
@@ -94,7 +100,7 @@ func (t *ListenerCollector) ErrWaiter(svc service.Service, cap int) Waiter {
 	return w
 }
 
-func (t *ListenerCollector) OnServiceState(svc service.Service, state service.State) {
+func (t *ListenerCollector) OnServiceState(svc *service.Service, state service.State) {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
@@ -104,7 +110,7 @@ func (t *ListenerCollector) OnServiceState(svc service.Service, state service.St
 	t.lock.Unlock()
 }
 
-func (t *ListenerCollector) OnServiceError(svc service.Service, err service.Error) {
+func (t *ListenerCollector) OnServiceError(stage service.Stage, svc *service.Service, err error) {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
@@ -118,7 +124,7 @@ func (t *ListenerCollector) OnServiceError(svc service.Service, err service.Erro
 	t.lock.Unlock()
 }
 
-func (t *ListenerCollector) OnServiceEnd(stage service.Stage, svc service.Service, err service.Error) {
+func (t *ListenerCollector) OnServiceEnd(stage service.Stage, svc *service.Service, err error) {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
@@ -136,7 +142,7 @@ func (t *ListenerCollector) OnServiceEnd(stage service.Stage, svc service.Servic
 }
 
 type listenerCollectorService struct {
-	errs      []service.Error
+	errs      []error
 	states    []service.State
 	ends      []*ListenerCollectorEnd
 	endWaiter *errWaiter

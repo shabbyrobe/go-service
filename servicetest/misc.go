@@ -1,6 +1,7 @@
 package servicetest
 
 import (
+	"context"
 	"sort"
 	"time"
 
@@ -39,12 +40,12 @@ type runnerWithFailingStart struct {
 	err error
 }
 
-func (t *runnerWithFailingStart) Start(svc service.Service, ready service.ReadySignal) (err error) {
+func (t *runnerWithFailingStart) Start(ctx context.Context, svc *service.Service, ready service.Signal) (h service.Handle, rerr error) {
 	if t.failAfter > 0 {
-		err = t.Runner.Start(svc, ready)
+		h, rerr = t.Runner.Start(ctx, svc, ready)
 		t.failAfter--
 	} else {
-		err = t.err
+		rerr = t.err
 	}
 	return
 }

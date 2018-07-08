@@ -15,7 +15,7 @@ type UnhaltableService struct {
 	init bool
 }
 
-var _ service.Service = &UnhaltableService{}
+var _ service.Runnable = &UnhaltableService{}
 
 func (u *UnhaltableService) Init() *UnhaltableService {
 	u.init = true
@@ -29,8 +29,6 @@ func (u *UnhaltableService) Init() *UnhaltableService {
 func (u *UnhaltableService) Kill() {
 	close(u.halt)
 }
-
-func (u *UnhaltableService) ServiceName() service.Name { return u.Name }
 
 func (u *UnhaltableService) Run(ctx service.Context) error {
 	if !u.init {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sync/atomic"
 	"time"
 )
 
@@ -48,8 +47,6 @@ type Context interface {
 	OnError(err error)
 }
 
-var _ context.Context = &svcContext{}
-
 // Sleep allows a service to perform an interruptible sleep - it will
 // return early if the service is halted.
 func Sleep(ctx Context, d time.Duration) (halted bool) {
@@ -71,107 +68,6 @@ func Sleep(ctx Context, d time.Duration) (halted bool) {
 		return true
 	}
 }
-
-type RunContext interface {
-	Context
-
-	// Halt stops the context. It must be safe to call Halt() more than once.
-	// Halt() does not block until the service is halted.
-	Halt()
-
-	WhenReady(func(svc Service) error) RunContext
-	WhenError(func(svc Service, err error)) RunContext
-}
-
-type (
-	readyFunc func(service Service) error
-	errFunc   func(service Service, err error)
-)
-
-var emptyErrFunc = func(service Service, err error) {}
-var emptyReadyFunc = func(service Service) error { return nil }
-
-type runContext struct {
-	svcContext
-	halted int32
-}
-
-func (f *runContext) Halt() {
-	if atomic.CompareAndSwapInt32(&f.halted, 0, 1) {
-		close(f.done)
-	}
-}
-
-func (f *runContext) WhenReady(readyFunc func(svc Service) error) RunContext {
-	if readyFunc != nil {
-		f.readyFunc = readyFunc
-	} else {
-		f.readyFunc = emptyReadyFunc
-	}
-	return f
-}
-
-func (f *runContext) WhenError(errFunc func(svc Service, err error)) RunContext {
-	if errFunc != nil {
-		f.errFunc = errFunc
-	} else {
-		f.errFunc = emptyErrFunc
-	}
-	return f
-}
-
-// Standalone returns a RunContext you can pass to Service.Run() if you
-// want to run the service outside a Runner.
-//
-// If you want to capture ready signals, see RunContext.WhenReady(). To capture
-// non-halting error signals, see RunContext.WhenError().
-//
-// This whole concept isn't great; if it's possible to remove it'll probably
-// be removed. It's not a good idea to use it.
-//
-func Standalone() RunContext {
-	ctx := &runContext{
-		svcContext: svcContext{
-			done:      make(chan struct{}),
-			readyFunc: emptyReadyFunc,
-			errFunc:   emptyErrFunc,
-		},
-	}
-	return ctx
-}
-
-type svcContext struct {
-	service   Service
-	readyFunc readyFunc
-	errFunc   errFunc
-	done      chan struct{}
-}
-
-func newSvcContext(service Service, readyFunc readyFunc, errFunc errFunc, done chan struct{}) Context {
-	return &svcContext{
-		service:   service,
-		done:      done,
-		readyFunc: readyFunc,
-		errFunc:   errFunc,
-	}
-}
-
-func (c *svcContext) Deadline() (deadline time.Time, ok bool) { return }
-
-func (c *svcContext) Err() error {
-	if IsDone(c) {
-		return context.Canceled
-	}
-	return nil
-}
-
-func (c *svcContext) Value(key interface{}) interface{} { return nil }
-
-func (c *svcContext) Ready() error { return c.readyFunc(c.service) }
-
-func (c *svcContext) OnError(err error) { c.errFunc(c.service, err) }
-
-func (c *svcContext) Done() <-chan struct{} { return c.done }
 
 // IsDone returns true if the context has been cancelled.
 //

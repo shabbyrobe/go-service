@@ -9,7 +9,6 @@ import (
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/go-service/servicemgr"
 )
 
 const DefaultShutdownTimeout = 5 * time.Second
@@ -76,13 +75,11 @@ type HTTP struct {
 	port int32
 }
 
-var _ service.Service = &HTTP{}
+var _ service.Runnable = &HTTP{}
 
-func NewHTTP(name service.Name, server *http.Server) *HTTP {
-	return &HTTP{Name: name, Server: server}
+func NewHTTP(server *http.Server) *HTTP {
+	return &HTTP{Server: server}
 }
-
-func (h *HTTP) ServiceName() service.Name { return h.Name }
 
 func (h *HTTP) Port() int { return int(atomic.LoadInt32(&h.port)) }
 
@@ -133,7 +130,7 @@ func (h *HTTP) addr() string {
 // Run the HTTP server as a service.Service.
 func (h *HTTP) Run(ctx service.Context) (rerr error) {
 	done := make(chan struct{})
-	failer := servicemgr.NewFailureListener(1)
+	failer := service.NewFailureListener(1)
 
 	go func() {
 		close(done)

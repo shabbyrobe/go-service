@@ -1,6 +1,7 @@
 package servicetest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -35,28 +36,6 @@ type RunnerFuzzer struct {
 	ServiceRunFailureChance   float64
 	StartWaitChance           float64
 
-	// Chance the fuzzer will register a service just before it is started.
-	// This should always succeed.
-	ServiceRegisterBeforeStartChance float64
-
-	// Chance the fuzzer will register a service just after it is started.
-	// There is a chance this won't succeed if the service halts before
-	// Register is called.
-	ServiceRegisterAfterStartChance float64
-
-	// Chance the fuzzer will attempt to register a random service at a random
-	// moment.
-	ServiceRegisterUnexpectedChance float64
-
-	// Chance the service will be unregistered immediately after it is halted, but
-	// only if it was registered by either ServiceRegisterBeforeStartChance or
-	// ServiceRegisterAfterStartChance.
-	ServiceUnregisterHaltChance float64
-
-	// Chance the fuzzer will attempt to unregister a random service at a random
-	// moment.
-	ServiceUnregisterUnexpectedChance float64
-
 	// Chance that the fuzzer will attempt to restart a random service at a
 	// random moment.
 	ServiceRestartChance float64
@@ -77,7 +56,7 @@ type RunnerFuzzer struct {
 	runners []service.Runner `json:"-"`
 	wg      *condGroup       `json:"-"`
 
-	services     []service.Service `json:"-"`
+	services     []*service.Service `json:"-"`
 	servicesLock sync.Mutex
 }
 
@@ -117,8 +96,9 @@ func (r *RunnerFuzzer) haltRunner() {
 		defer r.wg.Done()
 
 		// this can take a while so make sure it's done in a goroutine
-		n, _ := runner.Shutdown(r.ServiceHaltTimeout.Rand(), 0)
-		r.Stats.AddServicesCurrent(-n)
+		ctx, cancel := context.WithTimeout(context.Background(), r.ServiceHaltTimeout.Rand())
+		defer cancel()
+		err := runner.Shutdown(ctx)
 		r.Stats.AddRunnersHalted(1)
 	}()
 }
@@ -141,25 +121,6 @@ func (r *RunnerFuzzer) checkState() {
 	}
 }
 
-func (r *RunnerFuzzer) unexpectedUnregister() {
-	idx := rand.Intn(r.Stats.GetRunnersCurrent())
-	rn := r.runners[idx]
-	if rn == nil {
-		return
-	}
-
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-
-		svc := randomService(rn)
-		if svc != nil {
-			_, err := rn.Unregister(svc)
-			r.Stats.StatsForService(svc).ServiceUnregisterUnexpected.Add(err)
-		}
-	}()
-}
-
 func (r *RunnerFuzzer) restartService() {
 	idx := rand.Intn(r.Stats.GetRunnersCurrent())
 	rn := r.runners[idx]
@@ -173,23 +134,23 @@ func (r *RunnerFuzzer) restartService() {
 
 		svc := randomService(rn)
 		if svc != nil {
-			if err := service.EnsureHalt(rn, r.ServiceHaltTimeout.Rand(), svc); err != nil {
+			if err := service.HaltWaitTimeout(r.ServiceHaltTimeout.Rand(), rn, svc); err != nil {
 				fmt.Println(err)
-				r.Stats.StatsForService(svc).ServiceRestart.Add(err)
+				r.Stats.Service.ServiceRestart.Add(err)
 
 			} else {
-				err := rn.Start(svc, nil)
+				_, err := service.StartWaitTimeout(r.StartWaitTimeout.Rand(), rn, svc)
 
 				// FIXME: the fuzzer should get its stats from the state listener,
 				// not from the ended listener. These hacks are all in here because
 				// the fuzzer can only dynamically react to a service ending, but
 				// not when a service is starting.
 				if err == nil {
-					r.Stats.StatsForService(svc).ServiceStart.Add(nil)
+					r.Stats.Service.ServiceStart.Add(nil)
 					r.Stats.AddServicesCurrent(1)
 				}
 
-				r.Stats.StatsForService(svc).ServiceRestart.Add(err)
+				r.Stats.Service.ServiceRestart.Add(err)
 			}
 		}
 	}()
@@ -212,22 +173,19 @@ func (r *RunnerFuzzer) createService() {
 	} else if should(r.ServiceRunFailureChance) {
 		service.RunFailure = errRunFailure
 	}
-	r.runService(service, r.Stats.ServiceStats)
+	r.runService(service, r.Stats.Service)
 }
 
-func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) {
+func (r *RunnerFuzzer) runService(runnable service.Runnable, stats *FuzzServiceStats) {
 	runner := r.runners[rand.Intn(r.Stats.GetRunnersCurrent())]
+
+	svc := &service.Service{
+		Runnable: runnable,
+	}
 
 	r.servicesLock.Lock()
 	r.services = append(r.services, svc)
 	r.servicesLock.Unlock()
-
-	willRegisterBefore := should(r.ServiceRegisterBeforeStartChance)
-	willRegisterAfter := false
-	if !willRegisterBefore {
-		willRegisterAfter = should(r.ServiceRegisterAfterStartChance)
-	}
-	willRegister := willRegisterBefore || willRegisterAfter
 
 	var syncHalt chan struct{}
 	if r.SyncHalt {
@@ -246,19 +204,8 @@ func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) 
 			<-syncHalt
 		}
 
-		err := runner.Halt(r.ServiceHaltTimeout.Rand(), svc)
+		err := service.HaltWaitTimeout(r.ServiceHaltTimeout.Rand(), runner, svc)
 		stats.ServiceHalt.Add(err)
-
-		if err == nil && willRegister {
-			r.wg.Add(1)
-			go func() {
-				defer r.wg.Done()
-				if should(r.ServiceUnregisterHaltChance) {
-					_, err := runner.Unregister(svc)
-					stats.ServiceUnregisterHalt.Add(err)
-				}
-			}()
-		}
 	})
 
 	// Start the service
@@ -266,17 +213,12 @@ func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) 
 	go func() {
 		defer r.wg.Done()
 
-		if willRegisterBefore {
-			_ = runner.Register(svc)
-			stats.ServiceRegisterBeforeStart.Add(nil)
-		}
-
 		var err error
 		if should(r.StartWaitChance) {
-			err = service.StartWait(runner, r.StartWaitTimeout.Rand(), svc)
+			_, err = service.StartWaitTimeout(r.StartWaitTimeout.Rand(), runner, svc)
 			stats.ServiceStartWait.Add(err)
 		} else {
-			err = runner.Start(svc, nil)
+			_, err = runner.Start(nil, svc, nil)
 			stats.ServiceStart.Add(err)
 		}
 
@@ -285,11 +227,6 @@ func (r *RunnerFuzzer) runService(svc service.Service, stats *FuzzServiceStats) 
 		}
 
 		r.Stats.AddServicesCurrent(1)
-
-		if willRegisterAfter {
-			_ = runner.Register(svc)
-			stats.ServiceRegisterAfterStart.Add(nil)
-		}
 	}()
 }
 
@@ -315,11 +252,6 @@ func (r *RunnerFuzzer) doTick() {
 	// maybe check the state of a randomly chosen service
 	if should(r.StateCheckChance) {
 		r.checkState()
-	}
-
-	// maybe check the state of a randomly chosen service
-	if should(r.ServiceUnregisterUnexpectedChance) {
-		r.unexpectedUnregister()
 	}
 
 	// maybe restart a random service
@@ -375,10 +307,11 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 
 	// OK now we gotta clean up after ourselves.
 	timeout := 2*time.Second + (r.ServiceHaltDelay.Max * 10)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	for _, rn := range r.runners {
-		n, err := rn.Shutdown(timeout, 0)
-		r.Stats.AddServicesCurrent(-n)
-		tt.MustOK(err)
+		tt.MustOK(rn.Shutdown(ctx))
 	}
 
 	// Need to wait for any stray halt delays - the above Shutdown
@@ -388,23 +321,23 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	time.Sleep(r.ServiceHaltDelay.Max)
 }
 
-func (r *RunnerFuzzer) ServiceStats(svc service.Service) *FuzzServiceStats {
-	return r.Stats.ServiceStats
-}
-
 func (r *RunnerFuzzer) OnServiceState(svc service.Service, from, to service.State) {
 }
 
-func (r *RunnerFuzzer) OnServiceError(svc service.Service, err service.Error) {
-	r.Stats.ServiceStats.AddServiceError(err)
+func (r *RunnerFuzzer) OnServiceError() service.OnError {
+	return func(stage service.Stage, service *service.Service, err error) {
+		r.Stats.Service.AddServiceError(err)
+	}
 }
 
-func (r *RunnerFuzzer) OnServiceEnd(stage service.Stage, svc service.Service, err service.Error) {
-	var s *FuzzServiceStats
-	s = r.Stats.ServiceStats
-	s.AddServiceEnd(err)
+func (r *RunnerFuzzer) OnServiceEnd() service.OnEnd {
+	return func(stage service.Stage, service *service.Service, err error) {
+		var s *FuzzServiceStats
+		s = r.Stats.Service
+		s.AddServiceEnd(err)
 
-	r.Stats.AddServicesCurrent(-1)
+		r.Stats.AddServicesCurrent(-1)
+	}
 }
 
 func (r *RunnerFuzzer) hotLoop() {
@@ -426,9 +359,6 @@ type RunnerFuzzerBuilder struct {
 	ServiceStartFailureChance FloatRange
 	ServiceRunFailureChance   FloatRange
 
-	ServiceUnregisterHaltChance       FloatRange
-	ServiceUnregisterUnexpectedChance FloatRange
-
 	ServiceStartTime   TimeRangeMaker
 	StartWaitTimeout   TimeRangeMaker
 	ServiceRunTime     TimeRangeMaker
@@ -439,34 +369,32 @@ type RunnerFuzzerBuilder struct {
 
 func (f RunnerFuzzerBuilder) Next(dur time.Duration) *RunnerFuzzer {
 	return &RunnerFuzzer{
-		Duration:                          dur,
-		RunnerCreateChance:                f.RunnerCreateChance.Rand(),
-		RunnerHaltChance:                  f.RunnerHaltChance.Rand(),
-		RunnerLimit:                       fuzzDefaultRunnerLimit,
-		ServiceCreateChance:               f.ServiceCreateChance.Rand(),
-		ServiceHaltAfter:                  f.ServiceHaltAfter.Rand(),
-		ServiceHaltDelay:                  f.ServiceHaltDelay.Rand(),
-		ServiceHaltTimeout:                f.ServiceHaltTimeout.Rand(),
-		ServiceLimit:                      fuzzDefaultServiceLimit,
-		ServiceRunFailureChance:           f.ServiceRunFailureChance.Rand(),
-		ServiceRunTime:                    f.ServiceRunTime.Rand(),
-		ServiceStartFailureChance:         f.ServiceStartFailureChance.Rand(),
-		ServiceStartTime:                  f.ServiceStartTime.Rand(),
-		ServiceUnregisterHaltChance:       f.ServiceUnregisterHaltChance.Rand(),
-		ServiceUnregisterUnexpectedChance: f.ServiceUnregisterUnexpectedChance.Rand(),
-		StartWaitChance:                   f.StartWaitChance.Rand(),
-		StartWaitTimeout:                  f.StartWaitTimeout.Rand(),
-		StateCheckChance:                  f.StateCheckChance.Rand(),
+		Duration:                  dur,
+		RunnerCreateChance:        f.RunnerCreateChance.Rand(),
+		RunnerHaltChance:          f.RunnerHaltChance.Rand(),
+		RunnerLimit:               fuzzDefaultRunnerLimit,
+		ServiceCreateChance:       f.ServiceCreateChance.Rand(),
+		ServiceHaltAfter:          f.ServiceHaltAfter.Rand(),
+		ServiceHaltDelay:          f.ServiceHaltDelay.Rand(),
+		ServiceHaltTimeout:        f.ServiceHaltTimeout.Rand(),
+		ServiceLimit:              fuzzDefaultServiceLimit,
+		ServiceRunFailureChance:   f.ServiceRunFailureChance.Rand(),
+		ServiceRunTime:            f.ServiceRunTime.Rand(),
+		ServiceStartFailureChance: f.ServiceStartFailureChance.Rand(),
+		ServiceStartTime:          f.ServiceStartTime.Rand(),
+		StartWaitChance:           f.StartWaitChance.Rand(),
+		StartWaitTimeout:          f.StartWaitTimeout.Rand(),
+		StateCheckChance:          f.StateCheckChance.Rand(),
 	}
 }
 
-func randomService(rr service.Runner) service.Service {
-	var s service.Service
+func randomService(rr service.Runner) *service.Service {
+	var s service.ServiceInfo
 
 	// FIXME: this cheat relies on internal implementation details of service.Runner()
-	for _, s = range rr.Services(service.AnyState, 1) {
+	for _, s = range rr.Services(service.AnyState, 1, nil) {
 		break
 	}
 
-	return s
+	return s.Service
 }

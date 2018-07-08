@@ -49,11 +49,10 @@ func run() error {
 	flag.StringVar(&coverProfile, "cover", "", "coverage profile file")
 	flag.Parse()
 
-	coverPkgArg := "-coverpkg=github.com/shabbyrobe/go-service,github.com/shabbyrobe/go-service/servicemgr"
+	coverPkgArg := "-coverpkg=github.com/shabbyrobe/go-service"
 	pkgs := []testPkg{
 		{pkg: "github.com/shabbyrobe/go-service"},
 
-		{pkg: "github.com/shabbyrobe/go-service/servicemgr", args: []string{coverPkgArg}},
 		{pkg: "github.com/shabbyrobe/go-service/servicetest", args: []string{coverPkgArg}},
 		{pkg: "github.com/shabbyrobe/go-service/serviceutil", args: []string{coverPkgArg}},
 	}

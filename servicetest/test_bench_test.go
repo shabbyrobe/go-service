@@ -35,22 +35,24 @@ func BenchmarkGoroutineStart10(b *testing.B) {
 func benchmarkRunnerStartN(b *testing.B, n int) {
 	r := service.NewRunner(nil)
 
-	svcs := make([]service.Service, n)
+	svcs := make([]*service.Service, n)
 	for i := 0; i < n; i++ {
-		svcs[i] = (&BlockingService{}).Init()
+		svcs[i] = &service.Service{
+			Runnable: (&BlockingService{}).Init(),
+		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
 		for j := 0; j < n; j++ {
-			if err := r.Start(svcs[j], nil); err != nil {
+			if _, err := r.Start(nil, svcs[j], nil); err != nil {
 				panic(err)
 			}
 		}
 		b.StopTimer()
 		for j := 0; j < n; j++ {
-			if err := r.Halt(1*time.Second, svcs[j]); err != nil {
+			if err := service.HaltWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
 				panic(err)
 			}
 		}
@@ -60,22 +62,24 @@ func benchmarkRunnerStartN(b *testing.B, n int) {
 func benchmarkRunnerStartWaitN(b *testing.B, n int) {
 	r := service.NewRunner(nil)
 
-	svcs := make([]service.Service, n)
+	svcs := make([]*service.Service, n)
 	for i := 0; i < n; i++ {
-		svcs[i] = (&BlockingService{}).Init()
+		svcs[i] = &service.Service{
+			Runnable: (&BlockingService{}).Init(),
+		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
 		for j := 0; j < n; j++ {
-			if err := service.StartWait(r, 1*time.Second, svcs[j]); err != nil {
+			if _, err := service.StartWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
 				panic(err)
 			}
 		}
 		b.StopTimer()
 		for j := 0; j < n; j++ {
-			if err := r.Halt(1*time.Second, svcs[j]); err != nil {
+			if err := service.HaltWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
 				panic(err)
 			}
 		}
