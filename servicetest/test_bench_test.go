@@ -45,16 +45,13 @@ func benchmarkRunnerStartN(b *testing.B, n int) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
-		for j := 0; j < n; j++ {
-			if _, err := r.Start(nil, svcs[j], nil); err != nil {
-				panic(err)
-			}
+		if err := r.Start(nil, svcs...); err != nil {
+			panic(err)
 		}
 		b.StopTimer()
-		for j := 0; j < n; j++ {
-			if err := service.HaltWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
-				panic(err)
-			}
+
+		if err := service.HaltTimeout(1*time.Second, r, svcs...); err != nil {
+			panic(err)
 		}
 	}
 }
@@ -72,14 +69,12 @@ func benchmarkRunnerStartWaitN(b *testing.B, n int) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StartTimer()
-		for j := 0; j < n; j++ {
-			if _, err := service.StartWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
-				panic(err)
-			}
+		if err := service.StartTimeout(1*time.Second, r, svcs...); err != nil {
+			panic(err)
 		}
 		b.StopTimer()
 		for j := 0; j < n; j++ {
-			if err := service.HaltWaitTimeout(1*time.Second, r, svcs[j]); err != nil {
+			if err := service.HaltTimeout(1*time.Second, r, svcs...); err != nil {
 				panic(err)
 			}
 		}

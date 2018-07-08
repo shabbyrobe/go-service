@@ -1,15 +1,11 @@
-- service.WhenReady should take ctx so it can receive Done() signals from outside
-- Would be nice to be able to take a context from outside when starting a service.
-- context.Context in Ready() and Halt() Halt(context.Context, ...)
 - Tests for testing machinery. It's getting that way.
 - Nice formatting for metafuzz insanity params
 - Metafuzz parameters from an input argument
 - Document usage patterns
 - fuzzer runnerWithFailingStart chance
 - runner fuzzer service count should be reduced by onEnd
-- re-add service state changer
-  - make dummy service registry in serviceutil to validate that it's possible
-
+- make dummy service registry in serviceutil to validate that it's possible
+- unique incrementing id for every service start so you can tell if it actually happened.
 
 panic: runnerState should not be nil!
 

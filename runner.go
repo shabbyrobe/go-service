@@ -8,60 +8,26 @@ import (
 
 // Runner Starts, Halts and manages Services.
 type Runner interface {
-	// Start a service in this runner asynchronously.
-	//
-	// This method is intended as a building-block; if you want to start a
-	// service synchronously, see service.StartWait().
+	// Start one or more services in this runner and wait until they are Ready.
 	//
 	// An optional context can be provided via ctx; this allows cancellation to
 	// be declared outside the Runner. You may provide a nil Context.
 	//
-	// An optional Signal can be provided to wait for the service to signal it
-	// is "Ready", which will be called when one of the following conditions is
-	// met:
-	//
-	//	- The service calls ctx.Ready()
-	//	- The service returns before calling ctx.Ready()
-	//	- The service is halted before calling ctx.Ready()
-	//	- The provided context.Context is cancelled.
-	//
-	// Signal.Done() is called with nil if ctx.Ready() was successfully called,
-	// and an error in all other cases.
-	//
-	// Signal may be nil.
-	//
-	Start(ctx context.Context, svc *Service, ready Signal) (Handle, error)
+	Start(ctx context.Context, services ...*Service) error
 
-	// Halt a service started in this runner asynchronously.
-	//
-	// This method is intended as a building-block; if you want to start a
-	// service synchronously, see service.HaltWait().
+	// Halt one or more services that have been started in this runner.
 	//
 	// An optional context can be provided via ctx; this allows cancellation to
 	// be declared outside the Runner. You may provide a nil Context.
 	//
 	// If the context is cancelled before the service halts, you may have leaked
-	// a goroutine; there is no way for a service lost in this way to be
-	// recovered using this library, you will need to build in your own recovery
+	// a goroutine; there is no way for a service lost in this manner to be
+	// recovered using go-service, you will need to build in your own recovery
 	// mechanisms if you want to handle this condition. In practice, a
 	// cancelled 'halt' is probably a good time to panic(), but your specific
 	// application may be able to tolerate some goroutine leaks until you can
 	// fix the issue.
-	//
-	// An optional Signal can be provided to wait for the service to signal it
-	// is done halting, which will be called when one of the following
-	// conditions is met:
-	//
-	//	- The service calls ctx.Ready()
-	//	- The service returns before calling ctx.Ready()
-	//	- The service is halted before calling ctx.Ready()
-	//	- The provided context.Context is cancelled.
-	//
-	// Signal.Done() is called with nil if the service was successfully halted,
-	// and an error in all other cases.
-	//
-	// Signal may be nil.
-	Halt(ctx context.Context, svc *Service, done Signal) error
+	Halt(ctx context.Context, services ...*Service) error
 
 	// Shutdown halts all services started in this runner and prevents new ones
 	// from being started.
@@ -84,7 +50,10 @@ type Runner interface {
 	// does not shut down existing services.
 	Suspend() error
 
-	State(svc *Service) (state State)
+	// FIXME:
+	// RunnerState() RunnerState
+
+	State(svc *Service) State
 
 	// Services returns the list of services running at the time of the call.
 	// time of the call. If StateQuery is provided, only the matching services
@@ -99,22 +68,18 @@ type Runner interface {
 	Services(state State, limit int, into []ServiceInfo) []ServiceInfo
 }
 
-type OnEnd func(stage Stage, service *Service, err error)
-type OnError func(stage Stage, service *Service, err error)
-
 type RunnerOption func(rn *runner)
 
-func RunnerOnEnd(cb OnEnd) RunnerOption {
-	return func(rn *runner) { rn.onEnd = cb }
-}
-
-func RunnerOnError(cb OnError) RunnerOption {
-	return func(rn *runner) { rn.onError = cb }
-}
+func RunnerOnEnd(cb OnEnd) RunnerOption     { return func(rn *runner) { rn.onEnd = cb } }
+func RunnerOnError(cb OnError) RunnerOption { return func(rn *runner) { rn.onError = cb } }
+func RunnerOnState(cb OnState) RunnerOption { return func(rn *runner) { rn.onState = cb } }
 
 type runner struct {
+	// runner listeners MUST NOT be changed after runner is created, they are
+	// accessed without a lock.
 	onEnd   OnEnd
 	onError OnError
+	onState OnState
 
 	services map[*Service]*runnerService
 	state    RunnerState
@@ -133,39 +98,39 @@ func NewRunner(opts ...RunnerOption) Runner {
 	return rn
 }
 
-func (r *runner) Enable() error {
-	r.lock.Lock()
-	r.state = RunnerEnabled
-	r.lock.Unlock()
+func (rn *runner) Enable() error {
+	rn.lock.Lock()
+	rn.state = RunnerEnabled
+	rn.lock.Unlock()
 	return nil
 }
 
-func (r *runner) Suspend() error {
-	r.lock.Lock()
-	if r.state != RunnerEnabled {
-		r.lock.Unlock()
+func (rn *runner) Suspend() error {
+	rn.lock.Lock()
+	if rn.state != RunnerEnabled {
+		rn.lock.Unlock()
 		// FIXME: error that allows you to check if it's suspended or shut down:
 		return fmt.Errorf("runner is not enabled")
 	}
-	r.state = RunnerSuspended
-	r.lock.Unlock()
+	rn.state = RunnerSuspended
+	rn.lock.Unlock()
 	return nil
 }
 
-func (r *runner) Shutdown(ctx context.Context) (rerr error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
+	rn.lock.Lock()
+	defer rn.lock.Unlock()
 
-	if r.state != RunnerEnabled && r.state != RunnerSuspended {
+	if rn.state != RunnerEnabled && rn.state != RunnerSuspended {
 		// FIXME: error that allows you to check if it's suspended or shut down:
 		return fmt.Errorf("runner is not enabled")
 	}
 
-	signal := NewMultiSignal(len(r.services))
+	signal := NewMultiSignal(len(rn.services))
 
-	r.state = RunnerShutdown
+	rn.state = RunnerShutdown
 
-	for _, rs := range r.services {
+	for _, rs := range rn.services {
 		if err := rs.halting(ctx, signal); err != nil {
 			panic(err)
 		}
@@ -180,67 +145,120 @@ func (r *runner) Shutdown(ctx context.Context) (rerr error) {
 	}
 }
 
-func (r *runner) Start(ctx context.Context, svc *Service, ready Signal) (h Handle, rerr error) {
-	h = nilHandle
-	if svc == nil {
-		return h, fmt.Errorf("nil service")
-	}
-
-	var rs *runnerService
-	{
-		r.lock.Lock()
-		if r.state != RunnerEnabled {
-			r.lock.Unlock()
-
-			// FIXME: error that allows you to check if it's suspended or shut down:
-			return h, fmt.Errorf("runner is not enabled")
-		}
-
-		rs = r.services[svc]
-		if rs == nil {
-			rs = newRunnerService(r, svc, ready)
-			r.services[svc] = rs
-		}
-		r.lock.Unlock()
-	}
-
-	if err := rs.starting(ctx); err != nil {
-		return h, err
-	}
-	h = &handle{r: r, svc: svc}
-
-	go func() {
-		rerr := svc.Runnable.Run(rs)
-		if err := rs.ended(rerr); err != nil {
-			panic(err)
-		}
-	}()
-
-	return h, nil
-}
-
-func (r *runner) Halt(ctx context.Context, svc *Service, done Signal) (rerr error) {
-	if svc == nil {
-		return fmt.Errorf("nil service")
-	}
-
-	r.lock.Lock()
-	rs := r.services[svc]
-	if rs == nil {
-		r.lock.Unlock()
+func (rn *runner) Start(ctx context.Context, services ...*Service) error {
+	svcLen := len(services)
+	if svcLen == 0 {
 		return nil
 	}
-	r.lock.Unlock()
 
-	return rs.halting(ctx, done)
+	rn.lock.Lock()
+	if rn.state != RunnerEnabled {
+		rn.lock.Unlock()
+
+		// FIXME: error that allows you to check if it's suspended or shut down:
+		return fmt.Errorf("runner is not enabled")
+	}
+
+	ready := NewSignal(svcLen)
+
+	var errs []error
+
+	for _, svc := range services {
+		if svc == nil || svc.Runnable == nil {
+			ready.Done(nil)
+			continue
+		}
+
+		rs := rn.services[svc]
+		if rs == nil {
+			rs = newRunnerService(rn, svc, ready)
+			rn.services[svc] = rs
+		}
+
+		if err := rs.starting(ctx); err != nil {
+			ready.Done(err)
+			continue
+		}
+
+		go func(svc *Service) {
+			rerr := svc.Runnable.Run(rs)
+			if err := rs.ended(rerr); err != nil {
+				rn.lock.Unlock()
+				panic(err)
+			}
+		}(svc)
+	}
+	rn.lock.Unlock()
+
+	var ctxDone <-chan struct{}
+	if ctx != nil {
+		ctxDone = ctx.Done()
+	}
+
+	select {
+	case err := <-ready.Waiter():
+		errs = append(errs, Errors(err)...)
+		if len(errs) > 0 {
+			return &serviceErrors{errors: errs}
+		}
+		return nil
+
+	case <-ctxDone:
+		return ctx.Err()
+	}
 }
 
-func (r *runner) Services(query State, limit int, into []ServiceInfo) []ServiceInfo {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
+	svcLen := len(services)
+	if svcLen == 0 {
+		return nil
+	}
+
+	done := NewSignal(svcLen)
+
+	var errs []error
+
+	rn.lock.Lock()
+	for _, svc := range services {
+		rs := rn.services[svc]
+		if rs == nil {
+			rn.lock.Unlock()
+			return nil
+		}
+		if err := rs.halting(ctx, done); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		rs.halting(ctx, done)
+	}
+	rn.lock.Unlock()
+
+	select {
+	case err := <-done.Waiter():
+		errs = append(errs, Errors(err)...)
+		if len(errs) > 0 {
+			return &serviceErrors{errors: errs}
+		}
+		return nil
+
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (rn *runner) Services(query State, limit int, into []ServiceInfo) []ServiceInfo {
+	if query == Halted {
+		// The runner does not retain halted services, so this should
+		// always return nothing:
+		return nil
+	}
+
+	rn.lock.Lock()
+	defer rn.lock.Unlock()
 
 	if limit <= 0 {
-		limit = len(r.services)
+		limit = len(rn.services)
 	}
 
 	if len(into) == 0 {
@@ -248,7 +266,7 @@ func (r *runner) Services(query State, limit int, into []ServiceInfo) []ServiceI
 	}
 
 	n := 0
-	for service, rs := range r.services {
+	for service, rs := range rn.services {
 		state := rs.State()
 		if state.Match(query) {
 			into = append(into, ServiceInfo{
@@ -265,10 +283,10 @@ func (r *runner) Services(query State, limit int, into []ServiceInfo) []ServiceI
 	return into
 }
 
-func (r *runner) State(svc *Service) (state State) {
-	r.lock.Lock()
-	rs := r.services[svc]
-	r.lock.Unlock()
+func (rn *runner) State(svc *Service) (state State) {
+	rn.lock.Lock()
+	rs := rn.services[svc]
+	rn.lock.Unlock()
 
 	if rs != nil {
 		state = rs.State()
@@ -278,30 +296,36 @@ func (r *runner) State(svc *Service) (state State) {
 	return state
 }
 
-func (r *runner) raiseOnEnd(stage Stage, service *Service, err error) {
-	r.lock.Lock()
-	rend := r.onEnd
-	r.lock.Unlock()
+func (rn *runner) ended(stage Stage, service *Service, err error) {
+	rn.lock.Lock()
+	rend := rn.onEnd
+	delete(rn.services, service)
+	rn.lock.Unlock()
 
 	if rend != nil {
-		rend(stage, service, err)
+		go rend(stage, service, err)
 	}
 	if service.OnEnd != nil {
-		service.OnEnd(stage, service, err)
+		go service.OnEnd(stage, service, err)
 	}
 }
 
-func (r *runner) raiseOnError(stage Stage, service *Service, err error) {
-	r.lock.Lock()
-	rerror := r.onError
-	r.lock.Unlock()
-	if rerror != nil {
-		rerror(stage, service, err)
+func (rn *runner) raiseOnError(stage Stage, service *Service, err error) {
+	if rn.onError != nil {
+		go rn.onError(stage, service, err)
+	}
+}
+
+func (rn *runner) raiseOnState(service *Service, from, to State) {
+	if rn.onState != nil {
+		go rn.onState(service, from, to)
+	}
+	if service.OnState != nil {
+		go service.OnState(service, from, to)
 	}
 }
 
 type ServiceInfo struct {
-	State      State
-	Registered bool
-	Service    *Service
+	State   State
+	Service *Service
 }

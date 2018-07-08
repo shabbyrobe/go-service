@@ -9,10 +9,14 @@ import (
 	"github.com/shabbyrobe/golib/assert"
 )
 
+// TODO:
+// - NewSignal(0)
+// - NewMultiSignal(2)
+
 func TestSignalPutNil(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewSignal().(*signal)
+	srs := NewSignal(1).(*signal)
 	tt.MustAssert(srs.Done(nil))
 	tt.MustOK(<-srs.Waiter())
 	tt.MustOK(<-srs.Waiter())
@@ -27,7 +31,7 @@ func TestSignalPutNil(t *testing.T) {
 func TestSignalPutError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewSignal().(*signal)
+	srs := NewSignal(1).(*signal)
 	err := errors.New("yep")
 	tt.MustAssert(srs.Done(err))
 	tt.MustEqual(err, <-srs.Waiter())
@@ -44,7 +48,7 @@ func TestSignalPutError(t *testing.T) {
 func TestSignalWhenWaiterTimeout(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewSignal().(*signal)
+	srs := NewSignal(1).(*signal)
 
 	err := AwaitSignalTimeout(tscale, srs)
 	tt.MustEqual(err, context.DeadlineExceeded)
@@ -59,7 +63,7 @@ func TestSignalWhenWaiterTimeout(t *testing.T) {
 func TestSignalWhenWaiterError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewSignal().(*signal)
+	srs := NewSignal(1).(*signal)
 	err := errors.New("yep")
 	srs.Done(err)
 
@@ -71,7 +75,7 @@ func TestSignalWhenWaiterError(t *testing.T) {
 func TestSignalWhenWaiter(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	srs := NewSignal().(*signal)
+	srs := NewSignal(1).(*signal)
 	srs.Done(nil)
 	tt.MustOK(AwaitSignalTimeout(tscale, srs))
 

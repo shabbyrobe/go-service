@@ -55,6 +55,20 @@ func AwaitSignalTimeout(timeout time.Duration, signal Signal) error {
 	return AwaitSignal(ctx, signal)
 }
 
+func NewSignal(expected int) Signal {
+	switch expected {
+	case 0:
+		var signal *signal
+		return signal
+	case 1:
+		return &signal{
+			c: make(chan error, 1),
+		}
+	default:
+		return NewMultiSignal(expected)
+	}
+}
+
 const (
 	signalUnused    int32 = 0
 	signalCancelled int32 = 1
@@ -67,13 +81,10 @@ type signal struct {
 	signalled int32
 }
 
-func NewSignal() Signal {
-	return &signal{
-		c: make(chan error, 1),
-	}
-}
-
 func (ss *signal) Done(err error) (ok bool) {
+	if ss == nil {
+		return false
+	}
 	if !atomic.CompareAndSwapInt32(&ss.state, signalUnused, signalDone) {
 		return false
 	}
@@ -82,7 +93,7 @@ func (ss *signal) Done(err error) (ok bool) {
 }
 
 func (ss *signal) Waiter() <-chan error {
-	if !atomic.CompareAndSwapInt32(&ss.signalled, 0, 1) {
+	if ss == nil || !atomic.CompareAndSwapInt32(&ss.signalled, 0, 1) {
 		return closed
 	}
 	return ss.c

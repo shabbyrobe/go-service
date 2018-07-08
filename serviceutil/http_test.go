@@ -23,14 +23,14 @@ func TestHTTP(t *testing.T) {
 	})
 
 	ender := service.NewEndListener(1)
-	runner := service.NewRunner(service.RunnerOnEnd(ender.OnServiceEnd))
-	defer runner.Shutdown(1*time.Second, 0)
-	tt.MustOK(runner.StartWait(1*time.Second, h))
+	runner := service.NewRunner(service.RunnerOnEnd(ender.OnEnd))
+	defer service.MustShutdownTimeout(1*time.Second, runner)
+	tt.MustOK(service.StartTimeout(1*time.Second, runner, service.New("http", h)))
 
 	hc, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", h.Port()))
 	tt.MustOK(err)
 	b, err := ioutil.ReadAll(hc.Body)
 	tt.MustOK(err)
 	tt.MustEqual(string(b), string(bts))
-	tt.MustOK(runner.Shutdown(1*time.Second, 0))
+	tt.MustOK(service.ShutdownTimeout(1*time.Second, runner))
 }

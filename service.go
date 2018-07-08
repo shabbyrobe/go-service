@@ -1,57 +1,10 @@
 package service
 
-import (
-	"context"
-	"time"
-)
-
-type Handle interface {
-	Halt(ctx context.Context, done Signal) error
-	HaltWait(ctx context.Context) error
-	HaltWaitTimeout(time.Duration) error
-}
-
-// nilHandle is needed because of Go's typed nil interface.
-var nilHandle = &handle{}
-
-type handle struct {
-	r   Runner
-	svc *Service
-}
-
-var _ Handle = &handle{}
-
-func (h *handle) Halt(ctx context.Context, signal Signal) error {
-	if h == nilHandle {
-		return nil
-	}
-	return h.r.Halt(ctx, h.svc, signal)
-}
-
-func (h *handle) HaltWait(ctx context.Context) error {
-	if h == nilHandle {
-		return nil
-	}
-	signal := NewSignal()
-	if err := h.r.Halt(ctx, h.svc, signal); err != nil {
-		return err
-	}
-	return AwaitSignal(ctx, signal)
-}
-
-func (h *handle) HaltWaitTimeout(timeout time.Duration) error {
-	if h == nilHandle {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return h.HaltWait(ctx)
-}
-
 type Service struct {
 	Name     Name
 	Runnable Runnable
 	OnEnd    OnEnd
+	OnState  OnState
 }
 
 func New(n Name, r Runnable) *Service {
@@ -70,3 +23,7 @@ type Runnable interface {
 type RunnableFunc func(ctx Context) error
 
 func (r RunnableFunc) Run(ctx Context) error { return r(ctx) }
+
+type OnEnd func(stage Stage, service *Service, err error)
+type OnError func(stage Stage, service *Service, err error)
+type OnState func(service *Service, from, to State)

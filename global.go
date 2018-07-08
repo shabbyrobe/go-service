@@ -6,9 +6,36 @@ import (
 )
 
 var (
-	globalRunner *runner
-	lock         sync.RWMutex
+	globalRunner  *runner
+	globalOnEnd   OnEnd
+	globalOnError OnError
+	globalOnState OnState
+	lock          sync.RWMutex
 )
+
+func globalOnEndFn(stage Stage, service *Service, err error) {
+	lock.RLock()
+	defer lock.RUnlock()
+	if globalOnEnd != nil {
+		globalOnEnd(stage, service, err)
+	}
+}
+
+func globalOnErrorFn(stage Stage, service *Service, err error) {
+	lock.RLock()
+	defer lock.RUnlock()
+	if globalOnError != nil {
+		globalOnError(stage, service, err)
+	}
+}
+
+func globalOnStateFn(service *Service, from, to State) {
+	lock.RLock()
+	defer lock.RUnlock()
+	if globalOnState != nil {
+		globalOnState(service, from, to)
+	}
+}
 
 func GlobalRunner() (r Runner) {
 	lock.RLock()
@@ -44,5 +71,8 @@ func GlobalReset(ctx context.Context) {
 	}
 
 	globalRunner = NewRunner().(*runner)
+	globalOnEnd = nil
+	globalOnError = nil
+	globalOnState = nil
 	lock.Unlock()
 }

@@ -5,59 +5,67 @@ import (
 	"time"
 )
 
-// StartWait starts a Service and waits for it to become Ready().
-//
-// If an error is returned and the service's status is not Halted or Ended,
-// you shoud attempt to Halt() the service. If the service does not successfully
-// halt, you should panic as resources have been lost.
-//
-// An optional context.Context allows you to provide cancellation and timeout
-// externally. A nil context may be passed.
-func StartWait(ctx context.Context, runner Runner, service *Service) (h Handle, rerr error) {
-	sr := NewSignal()
-	h, rerr = runner.Start(ctx, service, sr)
-	if rerr != nil {
-		return nil, rerr
-	}
-	return h, AwaitSignal(ctx, sr)
-}
-
-func StartWaitTimeout(timeout time.Duration, runner Runner, service *Service) (h Handle, rerr error) {
+func StartTimeout(timeout time.Duration, runner Runner, services ...*Service) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return StartWait(ctx, runner, service)
+	return runner.Start(ctx, services...)
 }
 
-// HaltWait halts a Service and waits for it to finish halting.
-//
-// If an error is returned and the service's status is not Halted or Ended,
-// you should panic as resources have been lost.
-//
-// An optional context.Context allows you to provide cancellation and timeout
-// externally. A nil context may be passed.
-func HaltWait(ctx context.Context, runner Runner, service *Service) error {
-	sr := NewSignal()
-	if err := runner.Halt(ctx, service, sr); err != nil {
-		return err
-	}
-	return AwaitSignal(ctx, sr)
-}
-
-func HaltWaitTimeout(timeout time.Duration, runner Runner, service *Service) error {
+func HaltTimeout(timeout time.Duration, runner Runner, services ...*Service) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return HaltWait(ctx, runner, service)
+	return runner.Halt(ctx, services...)
 }
 
-// MustHalt calls HaltWait() and panics if it does not complete successfully.
+// MustHalt calls Runner.Halt() and panics if it does not complete successfully.
 //
-// This is a convenience to allow HaltWait to be called in a defer if it is
-// acceptable to crash the server if the service does not Halt.
-func MustHalt(ctx context.Context, r Runner, s *Service) {
-	if r == nil || s == nil {
+// This is a convenience to allow you to halt in a defer if it is acceptable to
+// crash the server if the service does not Halt.
+func MustHalt(ctx context.Context, r Runner, services ...*Service) {
+	if r == nil {
 		return
 	}
-	if err := HaltWait(ctx, r, s); err != nil {
+	if err := r.Halt(ctx, services...); err != nil {
 		panic(err)
 	}
+}
+
+// MustHaltTimeout calls MustHalt using context.WithTimeout()
+func MustHaltTimeout(timeout time.Duration, r Runner, services ...*Service) {
+	if r == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	MustHalt(ctx, r, services...)
+}
+
+func ShutdownTimeout(timeout time.Duration, runner Runner) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return runner.Shutdown(ctx)
+}
+
+// MustShutdown calls Runner.Shutdown() and panics if it does not complete
+// successfully.
+//
+// This is a convenience to allow you to halt in a defer if it is acceptable to
+// crash the server if the runner does not Shutdown.
+func MustShutdown(ctx context.Context, r Runner) {
+	if r == nil {
+		return
+	}
+	if err := r.Shutdown(ctx); err != nil {
+		panic(err)
+	}
+}
+
+// MustShutdownTimeout calls MustShutdown using context.WithTimeout()
+func MustShutdownTimeout(timeout time.Duration, r Runner) {
+	if r == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	MustShutdown(ctx, r)
 }

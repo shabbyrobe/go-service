@@ -60,14 +60,6 @@ type errorGroup interface {
 	Errors() []error
 }
 
-func errorList(err error) []error {
-	if eg, ok := err.(errorGroup); ok {
-		return eg.Errors()
-	} else {
-		return []error{err}
-	}
-}
-
 type serviceErrors struct {
 	errors []error
 }

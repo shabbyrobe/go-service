@@ -47,14 +47,19 @@ func (rs *runnerService) State() (state State) {
 
 func (rs *runnerService) starting(ctx context.Context) error {
 	rs.mu.Lock()
+
 	if rs.state != Halted && rs.state != Ended {
 		rs.mu.Unlock()
 		return fmt.Errorf("expected halted or ended")
 	}
 
 	rs.startCtx = ctx
-	rs.done = join(rs.halt, ctx.Done())
-	rs.state = Starting
+	if ctx != nil {
+		rs.done = join(rs.halt, ctx.Done())
+	} else {
+		rs.done = rs.halt
+	}
+	rs.setState(Starting)
 
 	rs.mu.Unlock()
 	return nil
@@ -75,7 +80,7 @@ func (rs *runnerService) halting(ctx context.Context, done Signal) (rerr error) 
 		rs.waiters = append(rs.waiters, done)
 	}
 	if rs.state != Halting {
-		rs.state = Halting
+		rs.setState(Halting)
 		close(rs.halt)
 	}
 
@@ -86,7 +91,7 @@ func (rs *runnerService) halting(ctx context.Context, done Signal) (rerr error) 
 
 func (rs *runnerService) ended(err error) error {
 	rs.mu.Lock()
-	rs.state = Ended
+	rs.setState(Ended)
 	rs.done = nil
 	rs.haltCtx = nil
 
@@ -103,12 +108,9 @@ func (rs *runnerService) ended(err error) error {
 	}
 	rs.waiters = nil
 
-	runner, service := rs.runner, rs.service
+	rs.runner.ended(stage, rs.service, err)
+
 	rs.mu.Unlock()
-
-	// Warning: do not attempt to access rs below this point
-
-	runner.raiseOnEnd(stage, service, err)
 
 	return nil
 }
@@ -117,11 +119,14 @@ func (rs *runnerService) Deadline() (deadline time.Time, ok bool) {
 	rs.mu.Lock()
 	if rs.startCtx != nil {
 		deadline, ok = rs.startCtx.Deadline()
+	} else if rs.haltCtx != nil {
+		deadline, ok = rs.haltCtx.Deadline()
 	}
 	rs.mu.Unlock()
 	return time.Time{}, false
 }
 
+// Err implements context.Context.Err().
 func (rs *runnerService) Err() (rerr error) {
 	rs.mu.Lock()
 	if rs.state == Ended {
@@ -131,6 +136,9 @@ func (rs *runnerService) Err() (rerr error) {
 	return rerr
 }
 
+// Value implements context.Context.Value, which you probably shouldn't use if
+// you can avoid it:
+// https://medium.com/@cep21/how-to-correctly-use-context-context-in-go-1-7-8f2c0fafdf39
 func (rs *runnerService) Value(key interface{}) (out interface{}) {
 	rs.mu.Lock()
 	if rs.startCtx != nil {
@@ -140,7 +148,11 @@ func (rs *runnerService) Value(key interface{}) (out interface{}) {
 	return out
 }
 
+// setReady expects rs.mu to be locked.
 func (rs *runnerService) setReady() {
+	// Note: this deliberately does not set the state to Started as the places
+	// where it is used have different destination states.
+
 	rs.startCtx = nil
 	rs.readyCalled = true
 	rs.done = rs.halt
@@ -150,12 +162,23 @@ func (rs *runnerService) setReady() {
 	}
 }
 
+// setState expects rs.mu to be locked.
+func (rs *runnerService) setState(state State) {
+	old := rs.state
+	rs.state = state
+	rs.runner.raiseOnState(rs.service, old, rs.state)
+}
+
 func (rs *runnerService) Ready() (rerr error) {
 	rs.mu.Lock()
-	rerr = rs.startCtx.Err()
+	if rs.startCtx != nil {
+		rerr = rs.startCtx.Err()
+	}
 
 	rs.setReady()
+	rs.setState(Started)
 	rs.mu.Unlock()
+
 	return rerr
 }
 

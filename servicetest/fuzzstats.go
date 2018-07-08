@@ -33,8 +33,7 @@ func NewFuzzStats() *FuzzStats {
 }
 
 func (s *FuzzStats) Starts() int {
-	return s.Service.ServiceStart.Total() +
-		s.Service.ServiceStartWait.Total()
+	return s.Service.ServiceStart.Total()
 }
 
 func (s *FuzzStats) Ends() int {
@@ -136,14 +135,9 @@ type FuzzServiceStats struct {
 	serviceEnded    int
 	serviceEndsLock sync.RWMutex
 
-	ServiceHalt                 *ErrorCounter
-	ServiceStart                *ErrorCounter
-	ServiceStartWait            *ErrorCounter
-	ServiceUnregisterHalt       *ErrorCounter
-	ServiceUnregisterUnexpected *ErrorCounter
-	ServiceRegisterBeforeStart  *ErrorCounter
-	ServiceRegisterAfterStart   *ErrorCounter
-	ServiceRestart              *ErrorCounter
+	ServiceHalt    *ErrorCounter
+	ServiceStart   *ErrorCounter
+	ServiceRestart *ErrorCounter
 }
 
 func NewFuzzServiceStats() *FuzzServiceStats {
@@ -151,14 +145,9 @@ func NewFuzzServiceStats() *FuzzServiceStats {
 		serviceEnds:   make(map[string]int),
 		serviceErrors: make(map[string]int),
 
-		ServiceHalt:                 &ErrorCounter{},
-		ServiceStart:                &ErrorCounter{},
-		ServiceStartWait:            &ErrorCounter{},
-		ServiceUnregisterHalt:       &ErrorCounter{},
-		ServiceUnregisterUnexpected: &ErrorCounter{},
-		ServiceRegisterBeforeStart:  &ErrorCounter{},
-		ServiceRegisterAfterStart:   &ErrorCounter{},
-		ServiceRestart:              &ErrorCounter{},
+		ServiceHalt:    &ErrorCounter{},
+		ServiceStart:   &ErrorCounter{},
+		ServiceRestart: &ErrorCounter{},
 	}
 }
 
@@ -175,11 +164,6 @@ func (s *FuzzServiceStats) Errors() (out []FuzzError) {
 	}{
 		{"ServiceHalt", s.ServiceHalt},
 		{"ServiceStart", s.ServiceStart},
-		{"ServiceStartWait", s.ServiceStartWait},
-		{"ServiceUnregisterHalt", s.ServiceUnregisterHalt},
-		{"ServiceUnregisterUnexpected", s.ServiceUnregisterUnexpected},
-		{"ServiceRegisterBeforeStart", s.ServiceRegisterBeforeStart},
-		{"ServiceRegisterAfterStart", s.ServiceRegisterAfterStart},
 		{"ServiceRestart", s.ServiceRestart},
 	} {
 		for e, cnt := range t.Counter.errors {
@@ -195,23 +179,13 @@ func (s *FuzzServiceStats) Errors() (out []FuzzError) {
 
 func (s *FuzzServiceStats) Map() map[string]interface{} {
 	return map[string]interface{}{
-		"ServiceEnded":                          s.ServiceEnded(),
-		"ServiceHalt.Succeeded":                 s.ServiceHalt.Succeeded(),
-		"ServiceHalt.Failed":                    s.ServiceHalt.Failed(),
-		"ServiceStart.Succeeded":                s.ServiceStart.Succeeded(),
-		"ServiceStart.Failed":                   s.ServiceStart.Failed(),
-		"ServiceStartWait.Succeeded":            s.ServiceStartWait.Succeeded(),
-		"ServiceStartWait.Failed":               s.ServiceStartWait.Failed(),
-		"ServiceUnregisterHalt.Succeeded":       s.ServiceUnregisterHalt.Succeeded(),
-		"ServiceUnregisterHalt.Failed":          s.ServiceUnregisterHalt.Failed(),
-		"ServiceUnregisterUnexpected.Succeeded": s.ServiceUnregisterUnexpected.Succeeded(),
-		"ServiceUnregisterUnexpected.Failed":    s.ServiceUnregisterUnexpected.Failed(),
-		"ServiceRegisterBeforeStart.Succeeded":  s.ServiceRegisterBeforeStart.Succeeded(),
-		"ServiceRegisterBeforeStart.Failed":     s.ServiceRegisterBeforeStart.Failed(),
-		"ServiceRegisterAfterStart.Succeeded":   s.ServiceRegisterAfterStart.Succeeded(),
-		"ServiceRegisterAfterStart.Failed":      s.ServiceRegisterAfterStart.Failed(),
-		"ServiceRestart.Succeeded":              s.ServiceRestart.Succeeded(),
-		"ServiceRestart.Failed":                 s.ServiceRestart.Failed(),
+		"ServiceEnded":             s.ServiceEnded(),
+		"ServiceHalt.Succeeded":    s.ServiceHalt.Succeeded(),
+		"ServiceHalt.Failed":       s.ServiceHalt.Failed(),
+		"ServiceStart.Succeeded":   s.ServiceStart.Succeeded(),
+		"ServiceStart.Failed":      s.ServiceStart.Failed(),
+		"ServiceRestart.Succeeded": s.ServiceRestart.Succeeded(),
+		"ServiceRestart.Failed":    s.ServiceRestart.Failed(),
 	}
 }
 
@@ -244,11 +218,6 @@ func (s *FuzzServiceStats) Clone() *FuzzServiceStats {
 
 	n.ServiceHalt = s.ServiceHalt.Clone()
 	n.ServiceStart = s.ServiceStart.Clone()
-	n.ServiceStartWait = s.ServiceStartWait.Clone()
-	n.ServiceUnregisterHalt = s.ServiceUnregisterHalt.Clone()
-	n.ServiceUnregisterUnexpected = s.ServiceUnregisterUnexpected.Clone()
-	n.ServiceRegisterAfterStart = s.ServiceRegisterAfterStart.Clone()
-	n.ServiceRegisterBeforeStart = s.ServiceRegisterBeforeStart.Clone()
 	n.ServiceRestart = s.ServiceRestart.Clone()
 
 	s.serviceEndsLock.Lock()
