@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"sync"
+
+	// "github.com/shabbyrobe/golib/synctools"
+	"github.com/shabbyrobe/golib/synctools"
 )
 
 // Runner Starts, Halts and manages Services.
@@ -83,7 +85,8 @@ type runner struct {
 
 	services map[*Service]*runnerService
 	state    RunnerState
-	lock     sync.RWMutex
+	// lock     sync.RWMutex
+	lock synctools.LoggingRWMutex
 }
 
 var _ Runner = &runner{}
@@ -131,16 +134,21 @@ func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
 	rn.state = RunnerShutdown
 
 	for _, rs := range rn.services {
-		if err := rs.halting(ctx, signal); err != nil {
+		if err := rs.halting(signal); err != nil {
 			panic(err)
 		}
+	}
+
+	var ctxDone <-chan struct{}
+	if ctx != nil {
+		ctxDone = ctx.Done()
 	}
 
 	select {
 	case err := <-signal.Waiter():
 		return err
 
-	case <-ctx.Done():
+	case <-ctxDone:
 		return ctx.Err()
 	}
 }
@@ -170,10 +178,13 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 		}
 
 		rs := rn.services[svc]
-		if rs == nil {
-			rs = newRunnerService(rn, svc, ready)
-			rn.services[svc] = rs
+		if rs != nil {
+			ready.Done(fmt.Errorf("service already running"))
+			continue
 		}
+
+		rs = newRunnerService(rn, svc, ready)
+		rn.services[svc] = rs
 
 		if err := rs.starting(ctx); err != nil {
 			ready.Done(err)
@@ -181,9 +192,9 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 		}
 
 		go func(svc *Service) {
+			// rn.lock is not assumed to be acquired in here.
 			rerr := svc.Runnable.Run(rs)
 			if err := rs.ended(rerr); err != nil {
-				rn.lock.Unlock()
 				panic(err)
 			}
 		}(svc)
@@ -222,17 +233,22 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 	for _, svc := range services {
 		rs := rn.services[svc]
 		if rs == nil {
-			rn.lock.Unlock()
-			return nil
-		}
-		if err := rs.halting(ctx, done); err != nil {
-			errs = append(errs, err)
+			done.Done(nil)
 			continue
 		}
 
-		rs.halting(ctx, done)
+		// halting will always call done.Done()
+		if err := rs.halting(done); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 	}
 	rn.lock.Unlock()
+
+	var ctxDone <-chan struct{}
+	if ctx != nil {
+		ctxDone = ctx.Done()
+	}
 
 	select {
 	case err := <-done.Waiter():
@@ -242,7 +258,7 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 		}
 		return nil
 
-	case <-ctx.Done():
+	case <-ctxDone:
 		return ctx.Err()
 	}
 }
@@ -256,6 +272,11 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
+
+	slen := len(rn.services)
+	if slen == 0 {
+		return into
+	}
 
 	if limit <= 0 {
 		limit = len(rn.services)
@@ -274,6 +295,7 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 				Service: service,
 			})
 			n++
+
 			if n >= limit {
 				break
 			}
@@ -298,12 +320,11 @@ func (rn *runner) State(svc *Service) (state State) {
 
 func (rn *runner) ended(stage Stage, service *Service, err error) {
 	rn.lock.Lock()
-	rend := rn.onEnd
 	delete(rn.services, service)
 	rn.lock.Unlock()
 
-	if rend != nil {
-		go rend(stage, service, err)
+	if rn.onEnd != nil {
+		go rn.onEnd(stage, service, err)
 	}
 	if service.OnEnd != nil {
 		go service.OnEnd(stage, service, err)

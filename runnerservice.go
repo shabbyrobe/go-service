@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"sync"
 	"time"
+
+	// "github.com/shabbyrobe/golib/synctools"
+	"github.com/shabbyrobe/golib/synctools"
 )
 
 type runnerService struct {
@@ -12,22 +13,23 @@ type runnerService struct {
 	retain bool
 
 	startCtx context.Context
-	haltCtx  context.Context
 
 	service     *Service
 	runner      *runner
 	ready       Signal
+	stage       Stage
 	waiters     []Signal
 	done        <-chan struct{}
 	halt        chan struct{}
 	readyCalled bool
 
-	mu sync.Mutex
+	mu synctools.LoggingMutex
 }
 
 func newRunnerService(r *runner, svc *Service, ready Signal) *runnerService {
 	rs := &runnerService{
 		state:   Halted,
+		stage:   StageReady,
 		ready:   ready,
 		runner:  r,
 		service: svc,
@@ -48,9 +50,10 @@ func (rs *runnerService) State() (state State) {
 func (rs *runnerService) starting(ctx context.Context) error {
 	rs.mu.Lock()
 
-	if rs.state != Halted && rs.state != Ended {
+	current := rs.state
+	if current != Halted && current != Ended {
 		rs.mu.Unlock()
-		return fmt.Errorf("expected halted or ended")
+		return &errState{Current: current, Expected: Halted | Ended, To: Starting}
 	}
 
 	rs.startCtx = ctx
@@ -65,7 +68,7 @@ func (rs *runnerService) starting(ctx context.Context) error {
 	return nil
 }
 
-func (rs *runnerService) halting(ctx context.Context, done Signal) (rerr error) {
+func (rs *runnerService) halting(done Signal) (rerr error) {
 	rs.mu.Lock()
 	if rs.state == Halted || rs.state == Ended {
 		rs.mu.Unlock()
@@ -73,12 +76,10 @@ func (rs *runnerService) halting(ctx context.Context, done Signal) (rerr error) 
 		return nil
 	}
 
-	rs.haltCtx = ctx
-	rs.done = ctx.Done()
-
 	if done != nil {
 		rs.waiters = append(rs.waiters, done)
 	}
+
 	if rs.state != Halting {
 		rs.setState(Halting)
 		close(rs.halt)
@@ -93,22 +94,37 @@ func (rs *runnerService) ended(err error) error {
 	rs.mu.Lock()
 	rs.setState(Ended)
 	rs.done = nil
-	rs.haltCtx = nil
 
-	stage := StageReady
-	if rs.readyCalled {
-		stage = StageRun
-	} else {
-		rs.setReady()
+	// This is a strange looking bit of code; we have to separate
+	// "ready errors" from "halt errors".
+	//
+	// - If a service ends, regardless of whether it was a "ready error" or a
+	//   "halt error", we want it reported to the listener as the "reason why
+	//   the service ended".
+	//
+	// - If the service fails before it is "ready", the error should be sent
+	//   to the "ready" signal *only*, not the "halt" signal.
+	//
+	// - This is relevant if "halt" is called after a service fails before it's
+	//   ready with a context timeout.
+	//
+	herr := err
+	if rs.stage == StageReady {
+		rs.setReady(err)
+		herr = nil
 	}
+
+	// This MUST happen before the waiters are notified. If not, then the
+	// service won't be deleted from Runner.services before Halt() returns,
+	// which can cause Start() to return a "service already running" error
+	// even if the calls to Start and Halt are sequential.
+	rs.runner.ended(rs.stage, rs.service, err)
 
 	rs.readyCalled = false
 	for _, w := range rs.waiters {
-		w.Done(err)
+		w.Done(herr)
 	}
 	rs.waiters = nil
-
-	rs.runner.ended(stage, rs.service, err)
 
 	rs.mu.Unlock()
 
@@ -119,8 +135,6 @@ func (rs *runnerService) Deadline() (deadline time.Time, ok bool) {
 	rs.mu.Lock()
 	if rs.startCtx != nil {
 		deadline, ok = rs.startCtx.Deadline()
-	} else if rs.haltCtx != nil {
-		deadline, ok = rs.haltCtx.Deadline()
 	}
 	rs.mu.Unlock()
 	return time.Time{}, false
@@ -149,15 +163,18 @@ func (rs *runnerService) Value(key interface{}) (out interface{}) {
 }
 
 // setReady expects rs.mu to be locked.
-func (rs *runnerService) setReady() {
+func (rs *runnerService) setReady(err error) {
 	// Note: this deliberately does not set the state to Started as the places
-	// where it is used have different destination states.
+	// where setReady is used have different destination states.
 
 	rs.startCtx = nil
 	rs.readyCalled = true
 	rs.done = rs.halt
+	if err == nil {
+		rs.stage = StageRun
+	}
 	if rs.ready != nil {
-		rs.ready.Done(nil)
+		rs.ready.Done(err)
 		rs.ready = nil
 	}
 }
@@ -175,7 +192,7 @@ func (rs *runnerService) Ready() (rerr error) {
 		rerr = rs.startCtx.Err()
 	}
 
-	rs.setReady()
+	rs.setReady(rerr)
 	rs.setState(Started)
 	rs.mu.Unlock()
 
@@ -184,16 +201,19 @@ func (rs *runnerService) Ready() (rerr error) {
 
 func (rs *runnerService) OnError(err error) {
 	rs.mu.Lock()
-	stage := StageReady
-	if rs.readyCalled {
-		stage = StageRun
-	}
-	runner, service := rs.runner, rs.service
+	runner, service, stage := rs.runner, rs.service, rs.stage
 	rs.mu.Unlock()
 
 	// Warning: do not attempt to access rs below this point
 
 	runner.raiseOnError(stage, service, err)
+}
+
+func (rs *runnerService) ShouldHalt() (v bool) {
+	rs.mu.Lock()
+	v = rs.state == Halting || rs.state == Halted || rs.state == Ended
+	rs.mu.Unlock()
+	return v
 }
 
 func (rs *runnerService) Done() <-chan struct{} {

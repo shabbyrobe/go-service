@@ -38,6 +38,8 @@ expect to be able to use a context.Context:
 type Context interface {
 	context.Context
 
+	ShouldHalt() bool
+
 	// Ready MUST be called by all services when they have finished
 	// their setup routines and are considered "Ready" to run.
 	Ready() error
@@ -66,18 +68,5 @@ func Sleep(ctx Context, d time.Duration) (halted bool) {
 		return false
 	case <-ctx.Done():
 		return true
-	}
-}
-
-// IsDone returns true if the context has been cancelled.
-//
-// If you have a service which does not use a for/select block, you can
-// poll the context with this method.
-func IsDone(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
 	}
 }

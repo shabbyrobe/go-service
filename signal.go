@@ -69,15 +69,8 @@ func NewSignal(expected int) Signal {
 	}
 }
 
-const (
-	signalUnused    int32 = 0
-	signalCancelled int32 = 1
-	signalDone      int32 = 2
-)
-
 type signal struct {
 	c         chan error
-	state     int32
 	signalled int32
 }
 
@@ -85,7 +78,7 @@ func (ss *signal) Done(err error) (ok bool) {
 	if ss == nil {
 		return false
 	}
-	if !atomic.CompareAndSwapInt32(&ss.state, signalUnused, signalDone) {
+	if !atomic.CompareAndSwapInt32(&ss.signalled, 0, 1) {
 		return false
 	}
 	ss.c <- err
@@ -93,9 +86,6 @@ func (ss *signal) Done(err error) (ok bool) {
 }
 
 func (ss *signal) Waiter() <-chan error {
-	if ss == nil || !atomic.CompareAndSwapInt32(&ss.signalled, 0, 1) {
-		return closed
-	}
 	return ss.c
 }
 

@@ -3,7 +3,6 @@ package servicetest
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
 	"os"
 	"runtime/pprof"
@@ -12,6 +11,10 @@ import (
 
 	service "github.com/shabbyrobe/go-service"
 	"github.com/shabbyrobe/golib/assert"
+
+	"github.com/shabbyrobe/golib/iotools"
+	"github.com/shabbyrobe/golib/synctools"
+	// "github.com/shabbyrobe/golib/synctools"
 )
 
 type RunnerFuzzer struct {
@@ -137,7 +140,7 @@ func (r *RunnerFuzzer) restartService() {
 		svc := randomService(rn)
 		if svc != nil {
 			if err := service.HaltTimeout(r.ServiceHaltTimeout.Rand(), rn, svc); err != nil {
-				fmt.Println(err) // FIXME!
+				// fmt.Println(err) // FIXME!
 				r.Stats.Service.ServiceRestart.Add(err)
 
 			} else {
@@ -215,6 +218,9 @@ func (r *RunnerFuzzer) runService(runnable service.Runnable, stats *FuzzServiceS
 	go func() {
 		defer r.wg.Done()
 
+		// the corresponding 'end' for this is in the 'service end' listener
+		r.wg.Add(1)
+
 		err := service.StartTimeout(r.StartWaitTimeout.Rand(), runner, svc)
 		stats.ServiceStart.Add(err)
 
@@ -234,7 +240,7 @@ func (r *RunnerFuzzer) doTick() {
 	}
 
 	// maybe start a runner
-	if rcur == 0 || r.Stats.GetTick() == 0 || (should(r.RunnerCreateChance)) && rcur < r.RunnerLimit {
+	if rcur == 0 || (should(r.RunnerCreateChance)) && rcur < r.RunnerLimit {
 		r.startRunner()
 	}
 
@@ -271,6 +277,13 @@ func (r *RunnerFuzzer) Init(tt assert.T) {
 }
 
 func (r *RunnerFuzzer) Run(tt assert.T) {
+	f, err := os.Create("/tmp/log")
+	if err != nil {
+		panic(err)
+	}
+	synctools.LoggingMutexWriter = iotools.NewLockedWriter(f)
+	defer f.Close()
+
 	tt.Helper()
 
 	// stats start must be called before r.Init() because it resets the runner count
@@ -293,7 +306,7 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 		close(done)
 	}()
 
-	after := time.After(10 * time.Second)
+	after := time.After(5 * time.Second)
 	select {
 	case <-after:
 		pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
@@ -307,7 +320,7 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	defer cancel()
 
 	for _, rn := range r.runners {
-		tt.MustOK(rn.Shutdown(ctx))
+		_ = rn.Shutdown(ctx)
 	}
 
 	// Need to wait for any stray halt delays - the above Shutdown
@@ -333,6 +346,7 @@ func (r *RunnerFuzzer) OnServiceEnd() service.OnEnd {
 		s.AddServiceEnd(err)
 
 		r.Stats.AddServicesCurrent(-1)
+		r.wg.Done()
 	}
 }
 

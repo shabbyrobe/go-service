@@ -67,8 +67,6 @@ func fuzzOutputCLI(name string, stats *FuzzStats, w io.Writer) error {
 		color(lightCyan, stats.Tick),
 	)
 
-	fmt.Fprintf(w, "%s  ", heading("groups"))
-
 	fmt.Fprintf(w, "%s  %s/%s ", heading("starts/ends"), value(stats.Starts()), value(stats.Ends()))
 
 	diff := stats.Ends() - stats.Starts()

@@ -33,7 +33,7 @@ func BenchmarkGoroutineStart10(b *testing.B) {
 }
 
 func benchmarkRunnerStartN(b *testing.B, n int) {
-	r := service.NewRunner(nil)
+	r := service.NewRunner()
 
 	svcs := make([]*service.Service, n)
 	for i := 0; i < n; i++ {
@@ -50,14 +50,14 @@ func benchmarkRunnerStartN(b *testing.B, n int) {
 		}
 		b.StopTimer()
 
-		if err := service.HaltTimeout(1*time.Second, r, svcs...); err != nil {
+		if err := r.Halt(nil, svcs...); err != nil {
 			panic(err)
 		}
 	}
 }
 
 func benchmarkRunnerStartWaitN(b *testing.B, n int) {
-	r := service.NewRunner(nil)
+	r := service.NewRunner()
 
 	svcs := make([]*service.Service, n)
 	for i := 0; i < n; i++ {

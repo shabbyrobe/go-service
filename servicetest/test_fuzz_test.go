@@ -17,24 +17,24 @@ func TestRunnerFuzzHappy(t *testing.T) {
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
 		SyncHalt:           true,
-		RunnerCreateChance: 0.001,
+		RunnerCreateChance: 0.0,
 		RunnerHaltChance:   0.0,
 
-		ServiceRestartableChance: 1.0,
-		ServiceRestartChance:     0.01,
+		// ServiceRestartableChance: 1.0,
+		// ServiceRestartChance:     0.01,
 
-		ServiceCreateChance:       0.2,
+		ServiceCreateChance:       0.5,
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
 		ServiceStartTime:   TimeRange{0, 0},
-		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
+		StartWaitTimeout:   TimeRange{1 * time.Second, 1 * time.Second},
 		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceHaltAfter:   TimeRange{10 * time.Microsecond, 1 * time.Second},
+		ServiceHaltAfter:   TimeRange{10 * time.Microsecond, 100 * time.Millisecond},
 		ServiceHaltDelay:   TimeRange{0, 0},
-		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
+		ServiceHaltTimeout: TimeRange{2 * time.Second, 2 * time.Second},
 
-		StateCheckChance: 0.2,
+		// StateCheckChance: 0.2,
 
 		Stats: stats,
 	})

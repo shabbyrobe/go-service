@@ -8,7 +8,7 @@ type Service struct {
 }
 
 func New(n Name, r Runnable) *Service {
-	return &Service{Runnable: r}
+	return &Service{Name: n, Runnable: r}
 }
 
 type Runnable interface {

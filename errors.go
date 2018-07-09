@@ -19,13 +19,8 @@ var ErrServiceEnded = errors.New("service ended")
 
 func (errRunnerSuspended) Error() string { return "service: runner was shut down" }
 
-func IsErrRunnerSuspended(err error) bool { _, ok := cause(err).(errRunnerSuspended); return ok }
-func IsErrServiceEnded(err error) bool    { return cause(err) == ErrServiceEnded }
-
-func IsErrNotRunning(err error) bool {
-	serr, ok := cause(err).(*errState)
-	return ok && !serr.Current.IsRunning()
-}
+func IsRunnerSuspended(err error) bool { _, ok := cause(err).(errRunnerSuspended); return ok }
+func IsServiceEnded(err error) bool    { return cause(err) == ErrServiceEnded }
 
 type Error interface {
 	error

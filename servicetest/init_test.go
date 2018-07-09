@@ -23,7 +23,6 @@ const (
 var (
 	fuzzEnabled      bool
 	fuzzServices     bool
-	fuzzGroups       bool
 	fuzzTimeStr      string
 	fuzzOutputFormat string
 	fuzzTimeDur      time.Duration
@@ -58,8 +57,6 @@ func TestMain(m *testing.M) {
 		"Fuzz? Nope by default.")
 	flag.BoolVar(&fuzzServices, "service.fuzzservices", true,
 		"When fuzzing, include plain service.Services if the test case includes them")
-	flag.BoolVar(&fuzzGroups, "service.fuzzgroups", true,
-		"When fuzzing, include service.Group if the test case includes them")
 	flag.StringVar(&fuzzTimeStr, "service.fuzztime", "1s",
 		"Run the fuzzer for this duration")
 	flag.Int64Var(&fuzzTickNsec, "service.fuzzticknsec", 0,

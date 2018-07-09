@@ -47,6 +47,8 @@ func (s State) name() string {
 		return "halting"
 	case Ended:
 		return "ended"
+	case NoState:
+		return "<none>"
 	}
 	return ""
 }
@@ -55,11 +57,17 @@ func (s State) String() string {
 	out := s.name()
 	if out == "" {
 		out = "("
+		first := true
 		for i := Ended; i > 0; i >>= 1 {
-			if i != Ended {
-				out += " or "
+			if i&s != i {
+				continue
 			}
-			out += s.name()
+			if !first {
+				out += " or "
+			} else {
+				first = false
+			}
+			out += i.name()
 		}
 		out += ")"
 	}
