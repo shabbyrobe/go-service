@@ -344,14 +344,16 @@ func TestHaltableSleep(t *testing.T) {
 
 	tt.MustOK(service.StartTimeout(dto, r, s1))
 	tm := time.Now()
-	tt.MustAssert(service.IsServiceEnded(service.HaltTimeout(dto, r, s1)))
-	tt.MustAssert(time.Since(tm) < time.Duration(float64(service.MinHaltableSleep)*0.9))
+	tt.MustOK(service.HaltTimeout(dto, r, s1))
+	since := time.Since(tm)
+	limit := time.Duration(float64(service.MinHaltableSleep) * 0.9)
+	tt.MustAssert(since < limit, "sleep time %s was not < %s", since, limit)
 
 	sr1.UnhaltableSleep = true
 	tt.MustOK(service.StartTimeout(dto, r, s1))
 	tm = time.Now()
-	tt.MustAssert(service.IsServiceEnded(service.HaltTimeout(dto, r, s1)))
-	since := time.Since(tm)
+	tt.MustOK(service.HaltTimeout(dto, r, s1))
+	since = time.Since(tm)
 
 	// only test for 95% of the delay because the timers aren't perfect. sometimes
 	// (though very, very rarely) we see test failures like this: "sleep time

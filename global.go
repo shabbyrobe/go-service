@@ -10,50 +10,50 @@ var (
 	globalOnEnd   OnEnd
 	globalOnError OnError
 	globalOnState OnState
-	lock          sync.RWMutex
+	globalMu      sync.RWMutex
 )
 
 func globalOnEndFn(stage Stage, service *Service, err error) {
-	lock.RLock()
-	defer lock.RUnlock()
+	globalMu.RLock()
+	defer globalMu.RUnlock()
 	if globalOnEnd != nil {
 		globalOnEnd(stage, service, err)
 	}
 }
 
 func globalOnErrorFn(stage Stage, service *Service, err error) {
-	lock.RLock()
-	defer lock.RUnlock()
+	globalMu.RLock()
+	defer globalMu.RUnlock()
 	if globalOnError != nil {
 		globalOnError(stage, service, err)
 	}
 }
 
 func globalOnStateFn(service *Service, from, to State) {
-	lock.RLock()
-	defer lock.RUnlock()
+	globalMu.RLock()
+	defer globalMu.RUnlock()
 	if globalOnState != nil {
 		globalOnState(service, from, to)
 	}
 }
 
 func GlobalRunner() (r Runner) {
-	lock.RLock()
+	globalMu.RLock()
 	r = globalRunner
-	lock.RUnlock()
+	globalMu.RUnlock()
 	return r
 }
 
 func GlobalRunnerOnEnd(cb OnEnd) {
-	globalRunner.lock.Lock()
+	globalRunner.mu.Lock()
 	globalRunner.onEnd = cb
-	globalRunner.lock.Unlock()
+	globalRunner.mu.Unlock()
 }
 
 func GlobalRunnerOnError(cb OnError) {
-	globalRunner.lock.Lock()
+	globalRunner.mu.Lock()
 	globalRunner.onError = cb
-	globalRunner.lock.Unlock()
+	globalRunner.mu.Unlock()
 }
 
 // GlobalReset is used to replace the global runner with a fresh one. The
@@ -62,10 +62,10 @@ func GlobalRunnerOnError(cb OnError) {
 //
 // context may be nil.
 func GlobalReset(ctx context.Context) {
-	lock.Lock()
+	globalMu.Lock()
 	if globalRunner != nil {
 		if err := globalRunner.Shutdown(ctx); err != nil {
-			lock.Unlock()
+			globalMu.Unlock()
 			panic(err)
 		}
 	}
@@ -74,5 +74,5 @@ func GlobalReset(ctx context.Context) {
 	globalOnEnd = nil
 	globalOnError = nil
 	globalOnState = nil
-	lock.Unlock()
+	globalMu.Unlock()
 }

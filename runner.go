@@ -83,10 +83,11 @@ type runner struct {
 	onError OnError
 	onState OnState
 
+	nextID   uint64
 	services map[*Service]*runnerService
 	state    RunnerState
-	// lock     sync.RWMutex
-	lock synctools.LoggingRWMutex
+	// mu     sync.RWMutex
+	mu synctools.LoggingRWMutex
 }
 
 var _ Runner = &runner{}
@@ -102,41 +103,49 @@ func NewRunner(opts ...RunnerOption) Runner {
 }
 
 func (rn *runner) Enable() error {
-	rn.lock.Lock()
+	rn.mu.Lock()
 	rn.state = RunnerEnabled
-	rn.lock.Unlock()
+	rn.mu.Unlock()
 	return nil
 }
 
 func (rn *runner) Suspend() error {
-	rn.lock.Lock()
+	rn.mu.Lock()
 	if rn.state != RunnerEnabled {
-		rn.lock.Unlock()
+		rn.mu.Unlock()
 		// FIXME: error that allows you to check if it's suspended or shut down:
 		return fmt.Errorf("runner is not enabled")
 	}
 	rn.state = RunnerSuspended
-	rn.lock.Unlock()
+	rn.mu.Unlock()
 	return nil
 }
 
 func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+	var signal Signal
 
-	if rn.state != RunnerEnabled && rn.state != RunnerSuspended {
-		// FIXME: error that allows you to check if it's suspended or shut down:
-		return fmt.Errorf("runner is not enabled")
-	}
+	if err := func() error {
+		rn.mu.Lock()
+		defer rn.mu.Unlock()
 
-	signal := NewMultiSignal(len(rn.services))
-
-	rn.state = RunnerShutdown
-
-	for _, rs := range rn.services {
-		if err := rs.halting(signal); err != nil {
-			panic(err)
+		if rn.state != RunnerEnabled && rn.state != RunnerSuspended {
+			// FIXME: error that allows you to check if it's suspended or shut down:
+			return fmt.Errorf("runner is not enabled")
 		}
+
+		signal = NewMultiSignal(len(rn.services))
+
+		rn.state = RunnerShutdown
+
+		for _, rs := range rn.services {
+			if err := rs.halting(signal); err != nil {
+				panic(err)
+			}
+		}
+		return nil
+
+	}(); err != nil {
+		return err
 	}
 
 	var ctxDone <-chan struct{}
@@ -159,9 +168,9 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 		return nil
 	}
 
-	rn.lock.Lock()
+	rn.mu.Lock()
 	if rn.state != RunnerEnabled {
-		rn.lock.Unlock()
+		rn.mu.Unlock()
 
 		// FIXME: error that allows you to check if it's suspended or shut down:
 		return fmt.Errorf("runner is not enabled")
@@ -183,7 +192,8 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 			continue
 		}
 
-		rs = newRunnerService(rn, svc, ready)
+		rn.nextID++
+		rs = newRunnerService(rn.nextID, rn, svc, ready)
 		rn.services[svc] = rs
 
 		if err := rs.starting(ctx); err != nil {
@@ -191,15 +201,15 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 			continue
 		}
 
-		go func(svc *Service) {
+		go func(rs *runnerService, svc *Service) {
 			// rn.lock is not assumed to be acquired in here.
 			rerr := svc.Runnable.Run(rs)
-			if err := rs.ended(rerr); err != nil {
+			if err := rn.ended(rs, rerr); err != nil {
 				panic(err)
 			}
-		}(svc)
+		}(rs, svc)
 	}
-	rn.lock.Unlock()
+	rn.mu.Unlock()
 
 	var ctxDone <-chan struct{}
 	if ctx != nil {
@@ -229,7 +239,7 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 
 	var errs []error
 
-	rn.lock.Lock()
+	rn.mu.Lock()
 	for _, svc := range services {
 		rs := rn.services[svc]
 		if rs == nil {
@@ -243,7 +253,7 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 			continue
 		}
 	}
-	rn.lock.Unlock()
+	rn.mu.Unlock()
 
 	var ctxDone <-chan struct{}
 	if ctx != nil {
@@ -270,8 +280,8 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 		return nil
 	}
 
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
 
 	slen := len(rn.services)
 	if slen == 0 {
@@ -306,9 +316,9 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 }
 
 func (rn *runner) State(svc *Service) (state State) {
-	rn.lock.Lock()
+	rn.mu.Lock()
 	rs := rn.services[svc]
-	rn.lock.Unlock()
+	rn.mu.Unlock()
 
 	if rs != nil {
 		state = rs.State()
@@ -318,11 +328,53 @@ func (rn *runner) State(svc *Service) (state State) {
 	return state
 }
 
-func (rn *runner) ended(stage Stage, service *Service, err error) {
-	rn.lock.Lock()
-	delete(rn.services, service)
-	rn.lock.Unlock()
+func (rn *runner) ended(rsvc *runnerService, err error) error {
+	rn.mu.Lock()
 
+	delete(rn.services, rsvc.service)
+
+	rsvc.mu.Lock()
+	rsvc.setState(Ended)
+	rsvc.done = nil
+
+	// This is a strange looking bit of code; we have to separate
+	// "ready errors" from "halt errors".
+	//
+	// - If a service ends, regardless of whether it was a "ready error" or a
+	//   "halt error", we want it reported to the listener as the "reason why
+	//   the service ended".
+	//
+	// - If the service fails before it is "ready", the error should be sent
+	//   to the "ready" signal *only*, not the "halt" signal.
+	//
+	// - This is relevant if "halt" is called after a service fails before it's
+	//   ready with a context timeout.
+	//
+	herr := err
+	if rsvc.stage == StageReady {
+		rsvc.setReady(err)
+		herr = nil
+	}
+
+	// This MUST happen before the waiters are notified. If not, then the
+	// service won't be deleted from Runner.services before Halt() returns,
+	// which can cause Start() to return a "service already running" error
+	// even if the calls to Start and Halt are sequential.
+	rn.raiseOnEnded(rsvc.stage, rsvc.service, err)
+
+	rsvc.readyCalled = false
+	for _, w := range rsvc.waiters {
+		w.Done(herr)
+	}
+	rsvc.waiters = nil
+
+	rsvc.mu.Unlock()
+	rn.mu.Unlock()
+
+	return nil
+}
+
+func (rn *runner) raiseOnEnded(stage Stage, service *Service, err error) {
 	if rn.onEnd != nil {
 		go rn.onEnd(stage, service, err)
 	}

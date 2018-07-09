@@ -140,7 +140,6 @@ func (r *RunnerFuzzer) restartService() {
 		svc := randomService(rn)
 		if svc != nil {
 			if err := service.HaltTimeout(r.ServiceHaltTimeout.Rand(), rn, svc); err != nil {
-				// fmt.Println(err) // FIXME!
 				r.Stats.Service.ServiceRestart.Add(err)
 
 			} else {
@@ -215,6 +214,8 @@ func (r *RunnerFuzzer) runService(runnable service.Runnable, stats *FuzzServiceS
 
 	// Start the service
 	r.wg.Add(1)
+	r.Stats.AddServicesCurrent(1)
+
 	go func() {
 		defer r.wg.Done()
 
@@ -227,8 +228,6 @@ func (r *RunnerFuzzer) runService(runnable service.Runnable, stats *FuzzServiceS
 		if syncHalt != nil {
 			close(syncHalt)
 		}
-
-		r.Stats.AddServicesCurrent(1)
 	}()
 }
 
@@ -306,7 +305,7 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 		close(done)
 	}()
 
-	after := time.After(5 * time.Second)
+	after := time.After(1 * time.Second)
 	select {
 	case <-after:
 		pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)

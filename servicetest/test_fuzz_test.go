@@ -70,14 +70,14 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceRestartableChance: 1.0,
 		ServiceRestartChance:     1.0,
 
-		ServiceCreateChance:       0.1,
+		ServiceCreateChance:       1.0,
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
 		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceHaltAfter:   TimeRange{100 * time.Microsecond, 10000 * time.Microsecond},
+		ServiceHaltAfter:   TimeRange{1 * time.Microsecond, 100 * time.Microsecond},
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
