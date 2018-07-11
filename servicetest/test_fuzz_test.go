@@ -20,21 +20,22 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		RunnerCreateChance: 0.0,
 		RunnerHaltChance:   0.0,
 
-		// ServiceRestartableChance: 1.0,
-		// ServiceRestartChance:     0.01,
+		ServiceRestartableChance: 1.0,
+		ServiceRestartChance:     0.01,
 
-		ServiceCreateChance:       0.5,
+		ServiceCreateChance:       1.0,
+		ServiceHaltChance:         0.05,
 		ServiceStartFailureChance: 0,
 		ServiceRunFailureChance:   0,
 
 		ServiceStartTime:   TimeRange{0, 0},
-		StartWaitTimeout:   TimeRange{1 * time.Second, 1 * time.Second},
+		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
 		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
 		ServiceHaltAfter:   TimeRange{10 * time.Microsecond, 100 * time.Millisecond},
 		ServiceHaltDelay:   TimeRange{0, 0},
-		ServiceHaltTimeout: TimeRange{2 * time.Second, 2 * time.Second},
+		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		// StateCheckChance: 0.2,
+		StateCheckChance: 0.2,
 
 		Stats: stats,
 	})
@@ -68,7 +69,7 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceLimit: 2,
 
 		ServiceRestartableChance: 1.0,
-		ServiceRestartChance:     1.0,
+		ServiceRestartChance:     0.5,
 
 		ServiceCreateChance:       1.0,
 		ServiceStartFailureChance: 0,
@@ -77,7 +78,7 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceStartTime:   TimeRange{0, 0},
 		StartWaitTimeout:   TimeRange{10 * time.Second, 10 * time.Second},
 		ServiceRunTime:     TimeRange{10 * time.Second, 10 * time.Second},
-		ServiceHaltAfter:   TimeRange{1 * time.Microsecond, 100 * time.Microsecond},
+		ServiceHaltAfter:   TimeRange{0, 1},
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 

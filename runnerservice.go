@@ -4,10 +4,9 @@ import (
 	"context"
 	"io"
 	"io/ioutil"
+	"sync"
 	"time"
-
 	// "github.com/shabbyrobe/golib/synctools"
-	"github.com/shabbyrobe/golib/synctools"
 )
 
 var Junk io.Writer = ioutil.Discard
@@ -26,7 +25,8 @@ type runnerService struct {
 	halt        chan struct{}
 	readyCalled bool
 
-	mu synctools.LoggingMutex
+	mu sync.Mutex
+	// mu synctools.LoggingMutex
 }
 
 func newRunnerService(id uint64, r *runner, svc *Service, ready Signal) *runnerService {

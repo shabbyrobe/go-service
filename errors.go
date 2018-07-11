@@ -8,6 +8,7 @@ import (
 
 type (
 	errRunnerSuspended int
+	errAlreadyRunning  int
 )
 
 // ErrServiceEnded is a sentinel error used to indicate that a service ended
@@ -18,9 +19,11 @@ type (
 var ErrServiceEnded = errors.New("service ended")
 
 func (errRunnerSuspended) Error() string { return "service: runner was shut down" }
+func (errAlreadyRunning) Error() string  { return "service: already running" }
 
 func IsRunnerSuspended(err error) bool { _, ok := cause(err).(errRunnerSuspended); return ok }
-func IsServiceEnded(err error) bool    { return cause(err) == ErrServiceEnded }
+func IsEnded(err error) bool           { return cause(err) == ErrServiceEnded }
+func IsAlreadyRunning(err error) bool  { _, ok := cause(err).(errAlreadyRunning); return ok }
 
 type Error interface {
 	error

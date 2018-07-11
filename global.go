@@ -9,7 +9,6 @@ var (
 	globalRunner  *runner
 	globalOnEnd   OnEnd
 	globalOnError OnError
-	globalOnState OnState
 	globalMu      sync.RWMutex
 )
 
@@ -26,14 +25,6 @@ func globalOnErrorFn(stage Stage, service *Service, err error) {
 	defer globalMu.RUnlock()
 	if globalOnError != nil {
 		globalOnError(stage, service, err)
-	}
-}
-
-func globalOnStateFn(service *Service, from, to State) {
-	globalMu.RLock()
-	defer globalMu.RUnlock()
-	if globalOnState != nil {
-		globalOnState(service, from, to)
 	}
 }
 
@@ -73,6 +64,5 @@ func GlobalReset(ctx context.Context) {
 	globalRunner = NewRunner().(*runner)
 	globalOnEnd = nil
 	globalOnError = nil
-	globalOnState = nil
 	globalMu.Unlock()
 }

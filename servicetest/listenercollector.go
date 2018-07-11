@@ -18,6 +18,12 @@ type Waiter interface {
 	C() <-chan error
 }
 
+type StateWaiter interface {
+	TakeN(n int, timeout time.Duration) []service.StateChange
+	Take(timeout time.Duration) *service.StateChange
+	C() <-chan service.StateChange
+}
+
 // ListenerCollector allows you to test things that make use of service.Runner's
 // listener.
 //
@@ -26,18 +32,21 @@ type Waiter interface {
 //
 type ListenerCollector struct {
 	services map[*service.Service]*listenerCollectorService
+	states   chan service.StateChange
 	lock     sync.Mutex
 }
 
 func NewListenerCollector() *ListenerCollector {
 	return &ListenerCollector{
 		services: make(map[*service.Service]*listenerCollectorService),
+		states:   make(chan service.StateChange, 50), // FIXME: configurable
 	}
 }
 
 func (t *ListenerCollector) RunnerOptions(opts ...service.RunnerOption) []service.RunnerOption {
 	opts = append(opts, service.RunnerOnEnd(t.OnServiceEnd))
 	opts = append(opts, service.RunnerOnError(t.OnServiceError))
+	opts = append(opts, service.RunnerOnState(t.states))
 	return opts
 }
 
@@ -52,6 +61,22 @@ func (t *ListenerCollector) Errs(svc *service.Service) (out []error) {
 		out = append(out, e)
 	}
 	return
+}
+
+func (t *ListenerCollector) ErrWaiter(svc *service.Service, cap int) Waiter {
+	t.lock.Lock()
+	if t.services[svc] == nil {
+		t.services[svc] = &listenerCollectorService{}
+	}
+	lsvc := t.services[svc]
+	if lsvc.errWaiter != nil {
+		close(lsvc.errWaiter.c)
+	}
+	w := &errWaiter{c: make(chan error, cap)}
+	lsvc.errWaiter = w
+	t.lock.Unlock()
+
+	return w
 }
 
 func (t *ListenerCollector) Ends(svc *service.Service) (out []ListenerCollectorEnd) {
@@ -84,30 +109,17 @@ func (t *ListenerCollector) EndWaiter(svc *service.Service, cap int) Waiter {
 	return w
 }
 
-func (t *ListenerCollector) ErrWaiter(svc *service.Service, cap int) Waiter {
+func (t *ListenerCollector) StateWaiter(svc *service.Service, cap int) StateWaiter {
 	t.lock.Lock()
 	if t.services[svc] == nil {
 		t.services[svc] = &listenerCollectorService{}
 	}
 	lsvc := t.services[svc]
-	if lsvc.errWaiter != nil {
-		close(lsvc.errWaiter.c)
-	}
-	w := &errWaiter{c: make(chan error, cap)}
-	lsvc.errWaiter = w
+	w := &stateWaiter{c: t.states}
+	lsvc.stateWaiter = w
 	t.lock.Unlock()
 
 	return w
-}
-
-func (t *ListenerCollector) OnServiceState(svc *service.Service, state service.State) {
-	t.lock.Lock()
-	if t.services[svc] == nil {
-		t.services[svc] = &listenerCollectorService{}
-	}
-	lsvc := t.services[svc]
-	lsvc.states = append(lsvc.states, state)
-	t.lock.Unlock()
 }
 
 func (t *ListenerCollector) OnServiceError(stage service.Stage, svc *service.Service, err error) {
@@ -142,11 +154,12 @@ func (t *ListenerCollector) OnServiceEnd(stage service.Stage, svc *service.Servi
 }
 
 type listenerCollectorService struct {
-	errs      []error
-	states    []service.State
-	ends      []*ListenerCollectorEnd
-	endWaiter *errWaiter
-	errWaiter *errWaiter
+	errs        []error
+	states      []service.StateChange
+	ends        []*ListenerCollectorEnd
+	endWaiter   *errWaiter
+	errWaiter   *errWaiter
+	stateWaiter *stateWaiter
 }
 
 type errWaiter struct {
@@ -174,6 +187,36 @@ func (e *errWaiter) TakeN(n int, timeout time.Duration) []error {
 		case out[i] = <-e.c:
 		case <-wait:
 			panic("errwaiter timeout")
+		}
+	}
+	return out
+}
+
+type stateWaiter struct {
+	c chan service.StateChange
+}
+
+func (e *stateWaiter) C() <-chan service.StateChange { return e.c }
+
+func (e *stateWaiter) Take(timeout time.Duration) *service.StateChange {
+	vs := e.TakeN(1, timeout)
+	if len(vs) == 1 {
+		return &vs[0]
+	} else if len(vs) == 0 {
+		return nil
+	} else {
+		panic("unexpected states")
+	}
+}
+
+func (e *stateWaiter) TakeN(n int, timeout time.Duration) []service.StateChange {
+	out := make([]service.StateChange, n)
+	for i := 0; i < n; i++ {
+		wait := time.After(timeout)
+		select {
+		case out[i] = <-e.c:
+		case <-wait:
+			panic("statewaiter timeout")
 		}
 	}
 	return out

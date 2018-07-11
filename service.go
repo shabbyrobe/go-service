@@ -4,7 +4,7 @@ type Service struct {
 	Name     Name
 	Runnable Runnable
 	OnEnd    OnEnd
-	OnState  OnState
+	OnState  chan StateChange
 }
 
 func New(n Name, r Runnable) *Service {
@@ -26,4 +26,3 @@ func (r RunnableFunc) Run(ctx Context) error { return r(ctx) }
 
 type OnEnd func(stage Stage, service *Service, err error)
 type OnError func(stage Stage, service *Service, err error)
-type OnState func(service *Service, from, to State)

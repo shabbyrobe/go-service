@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
-	"sync"
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
@@ -34,7 +33,12 @@ type RunnerFuzzer struct {
 	// path make.
 	RunnerHaltChance float64
 
-	ServiceCreateChance       float64
+	ServiceCreateChance float64
+
+	// Chance that the fuzzer will randomly halt a service, regardless of
+	// whether it is an appropriate time:
+	ServiceHaltChance float64
+
 	ServiceStartFailureChance float64
 	ServiceRunFailureChance   float64
 
@@ -57,9 +61,6 @@ type RunnerFuzzer struct {
 
 	runners []service.Runner `json:"-"`
 	wg      *condGroup       `json:"-"`
-
-	services     []*service.Service `json:"-"`
-	servicesLock sync.Mutex
 }
 
 var (
@@ -108,25 +109,42 @@ func (r *RunnerFuzzer) haltRunner() {
 	}()
 }
 
+func (r *RunnerFuzzer) haltService() {
+	idx := rand.Intn(r.Stats.GetRunnersCurrent())
+	rn := r.runners[idx]
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		svc := randomService(rn)
+		if svc != nil {
+			err := service.HaltTimeout(r.ServiceHaltTimeout.Rand(), rn, svc)
+			r.Stats.Service.ServiceHalt.Add(err)
+		}
+	}()
+}
+
 func (r *RunnerFuzzer) checkState() {
 	idx := rand.Intn(r.Stats.GetRunnersCurrent())
 	rn := r.runners[idx]
 
-	if rr, ok := rn.(service.Runner); ok {
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
 
-			svc := randomService(rr)
-			if svc != nil {
-				state := rr.State(svc)
-				r.Stats.AddStateCheckResult(state)
-			}
-		}()
-	}
+		svc := randomService(rn)
+		if svc != nil {
+			state := rn.State(svc)
+			r.Stats.AddStateCheckResult(state)
+		}
+	}()
 }
 
 func (r *RunnerFuzzer) restartService() {
+	// FIXME: this does not work yet.
+	return
+
 	idx := rand.Intn(r.Stats.GetRunnersCurrent())
 	rn := r.runners[idx]
 	if rn == nil {
@@ -150,7 +168,6 @@ func (r *RunnerFuzzer) restartService() {
 				// the fuzzer can only dynamically react to a service ending, but
 				// not when a service is starting.
 				if err == nil {
-					r.Stats.Service.ServiceStart.Add(nil)
 					r.Stats.AddServicesCurrent(1)
 				}
 
@@ -187,47 +204,23 @@ func (r *RunnerFuzzer) runService(runnable service.Runnable, stats *FuzzServiceS
 		Runnable: runnable,
 	}
 
-	r.servicesLock.Lock()
-	r.services = append(r.services, svc)
-	r.servicesLock.Unlock()
-
-	var syncHalt chan struct{}
-	if r.SyncHalt {
-		syncHalt = make(chan struct{})
-	}
-
-	// After a while, we will halt the service, but only if it hasn't ended
-	// first.
-	// This needs to happen before we start the service so that it is possible
-	// under certain configurations for the halt to happen before the start.
 	r.wg.Add(1)
-	time.AfterFunc(r.ServiceHaltAfter.Rand(), func() {
-		defer r.wg.Done()
-
-		if syncHalt != nil {
-			<-syncHalt
-		}
-
-		err := service.HaltTimeout(r.ServiceHaltTimeout.Rand(), runner, svc)
-		stats.ServiceHalt.Add(err)
-	})
-
-	// Start the service
-	r.wg.Add(1)
-	r.Stats.AddServicesCurrent(1)
-
 	go func() {
 		defer r.wg.Done()
 
-		// the corresponding 'end' for this is in the 'service end' listener
-		r.wg.Add(1)
-
 		err := service.StartTimeout(r.StartWaitTimeout.Rand(), runner, svc)
+
+		r.Stats.AddServicesCurrent(1)
+
 		stats.ServiceStart.Add(err)
 
-		if syncHalt != nil {
-			close(syncHalt)
-		}
+		r.wg.Add(1)
+		time.AfterFunc(r.ServiceHaltAfter.Rand(), func() {
+			defer r.wg.Done()
+
+			err := service.HaltTimeout(r.ServiceHaltTimeout.Rand(), runner, svc)
+			stats.ServiceHalt.Add(err)
+		})
 	}()
 }
 
@@ -248,6 +241,11 @@ func (r *RunnerFuzzer) doTick() {
 	scur := r.Stats.GetServicesCurrent()
 	if fuzzServices && should(r.ServiceCreateChance) && scur < r.ServiceLimit {
 		r.createService()
+	}
+
+	// maybe try halt a random service, regardless of its current state
+	if fuzzServices && should(r.ServiceHaltChance) {
+		r.haltService()
 	}
 
 	// maybe check the state of a randomly chosen service
@@ -299,27 +297,38 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 		r.tickLoop()
 	}
 
-	done := make(chan struct{})
-	go func() {
-		r.wg.Wait()
-		close(done)
-	}()
-
-	after := time.After(1 * time.Second)
-	select {
-	case <-after:
-		pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
-		panic("fuzzer shutdown waited too long for goroutines")
-	case <-done:
+	wait := r.ServiceHaltTimeout.Max
+	if r.ServiceRunTime.Max > wait {
+		wait = r.ServiceRunTime.Max
+	}
+	if r.ServiceHaltTimeout.Max > wait {
+		wait = r.ServiceHaltTimeout.Max
 	}
 
-	// OK now we gotta clean up after ourselves.
-	timeout := 2*time.Second + (r.ServiceHaltDelay.Max * 10)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	{ // wait for goroutines
+		doneGo := make(chan struct{})
+		go func() {
+			r.wg.Wait()
+			close(doneGo)
+		}()
 
-	for _, rn := range r.runners {
-		_ = rn.Shutdown(ctx)
+		after := time.After(wait * 2)
+		select {
+		case <-after:
+			pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
+			panic("fuzzer shutdown waited too long for goroutines")
+		case <-doneGo:
+		}
+	}
+
+	{ // OK now we gotta clean up after ourselves.
+		timeout := (2 * time.Second) + (wait * 2)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		for _, rn := range r.runners {
+			_ = rn.Shutdown(ctx)
+		}
 	}
 
 	// Need to wait for any stray halt delays - the above Shutdown
@@ -327,9 +336,6 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	// things that are already Halting and not blocking to wait for them.
 	// That may not be ideal, perhaps it should be fixed.
 	time.Sleep(r.ServiceHaltDelay.Max)
-}
-
-func (r *RunnerFuzzer) OnServiceState(svc service.Service, from, to service.State) {
 }
 
 func (r *RunnerFuzzer) OnServiceError() service.OnError {
@@ -345,7 +351,6 @@ func (r *RunnerFuzzer) OnServiceEnd() service.OnEnd {
 		s.AddServiceEnd(err)
 
 		r.Stats.AddServicesCurrent(-1)
-		r.wg.Done()
 	}
 }
 

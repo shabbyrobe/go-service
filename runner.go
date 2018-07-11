@@ -3,9 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-
+	"sync"
 	// "github.com/shabbyrobe/golib/synctools"
-	"github.com/shabbyrobe/golib/synctools"
 )
 
 // Runner Starts, Halts and manages Services.
@@ -72,22 +71,23 @@ type Runner interface {
 
 type RunnerOption func(rn *runner)
 
-func RunnerOnEnd(cb OnEnd) RunnerOption     { return func(rn *runner) { rn.onEnd = cb } }
-func RunnerOnError(cb OnError) RunnerOption { return func(rn *runner) { rn.onError = cb } }
-func RunnerOnState(cb OnState) RunnerOption { return func(rn *runner) { rn.onState = cb } }
+func RunnerOnEnd(cb OnEnd) RunnerOption                { return func(rn *runner) { rn.onEnd = cb } }
+func RunnerOnError(cb OnError) RunnerOption            { return func(rn *runner) { rn.onError = cb } }
+func RunnerOnState(ch chan<- StateChange) RunnerOption { return func(rn *runner) { rn.onState = ch } }
 
 type runner struct {
 	// runner listeners MUST NOT be changed after runner is created, they are
 	// accessed without a lock.
 	onEnd   OnEnd
 	onError OnError
-	onState OnState
+	onState chan<- StateChange
 
 	nextID   uint64
 	services map[*Service]*runnerService
 	state    RunnerState
-	// mu     sync.RWMutex
-	mu synctools.LoggingRWMutex
+
+	mu sync.RWMutex
+	// mu synctools.LoggingRWMutex
 }
 
 var _ Runner = &runner{}
@@ -188,7 +188,7 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 
 		rs := rn.services[svc]
 		if rs != nil {
-			ready.Done(fmt.Errorf("service already running"))
+			ready.Done(errAlreadyRunning(1))
 			continue
 		}
 
@@ -280,8 +280,8 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 		return nil
 	}
 
-	rn.mu.Lock()
-	defer rn.mu.Unlock()
+	rn.mu.RLock()
+	defer rn.mu.RUnlock()
 
 	slen := len(rn.services)
 	if slen == 0 {
@@ -316,9 +316,9 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 }
 
 func (rn *runner) State(svc *Service) (state State) {
-	rn.mu.Lock()
+	rn.mu.RLock()
 	rs := rn.services[svc]
-	rn.mu.Unlock()
+	rn.mu.RUnlock()
 
 	if rs != nil {
 		state = rs.State()
@@ -391,14 +391,25 @@ func (rn *runner) raiseOnError(stage Stage, service *Service, err error) {
 
 func (rn *runner) raiseOnState(service *Service, from, to State) {
 	if rn.onState != nil {
-		go rn.onState(service, from, to)
+		select {
+		case rn.onState <- StateChange{service, from, to}:
+		default:
+		}
 	}
 	if service.OnState != nil {
-		go service.OnState(service, from, to)
+		select {
+		case service.OnState <- StateChange{service, from, to}:
+		default:
+		}
 	}
 }
 
 type ServiceInfo struct {
 	State   State
 	Service *Service
+}
+
+type StateChange struct {
+	Service  *Service
+	From, To State
 }
