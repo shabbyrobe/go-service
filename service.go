@@ -1,10 +1,19 @@
 package service
 
+// Service wraps a Runnable with common properties.
 type Service struct {
 	Name     Name
 	Runnable Runnable
-	OnEnd    OnEnd
-	OnState  chan StateChange
+
+	// OnEnd will be called whenever a service ends. A service ends when
+	// it is Halted or when it returns before it is halted.
+	OnEnd OnEnd
+
+	// OnStateChange allows you to receive notifications when the state
+	// of a service changes. The Runner will drop state changes if this
+	// channel is not able to receive them, so supply a big buffer if
+	// that concerns you.
+	OnState chan StateChange
 }
 
 func New(n Name, r Runnable) *Service {
@@ -27,6 +36,17 @@ type Runnable interface {
 	Run(ctx Context) error
 }
 
+// RunnableFunc allows you to create a Runnable from a Closure, similar to
+// http.HandlerFunc:
+//
+//	service.New("my-runnable-func", func(ctx service.Context) error {
+//		if err := ctx.Ready() {
+//			return err
+//		}
+//		<-ctx.Done()
+//		return nil
+//	})
+//
 type RunnableFunc func(ctx Context) error
 
 func (r RunnableFunc) Run(ctx Context) error { return r(ctx) }

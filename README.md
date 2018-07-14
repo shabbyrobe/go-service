@@ -70,7 +70,7 @@ func run() error {
 	// If you want to be notified if the service ends prematurely, attach
 	// an EndListener.
 	failer := service.NewFailureListener(1)
-	svc := service.New(rn).WithEndListener(failer)
+	svc := service.New("my-service", rn).WithEndListener(failer)
 
 	// Start a service in the background. The call to Start will unblock when
 	// MyRunnable.Run() calls ctx.Ready():
@@ -120,8 +120,8 @@ context is `Done()`:
 
 ```go
 runner := service.NewRunner()
-svc1 := service.New(&MyRunnable{})
-svc2 := service.New(&MyRunnable{})
+svc1 := service.New("s1", &MyRunnable{})
+svc2 := service.New("s2", &MyRunnable{})
 err := runner.Start(context.Background(), svc1, svc2)
 ```
 

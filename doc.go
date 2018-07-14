@@ -45,7 +45,7 @@ Quick Example
 		// If you want to be notified if the service ends prematurely, attach
 		// an EndListener.
 		failer := service.NewFailureListener(1)
-		svc := service.New(rn).WithEndListener(failer)
+		svc := service.New("my-service", rn).WithEndListener(failer)
 
 		// Start a service in the background. The call to Start will unblock when
 		// MyRunnable.Run() calls ctx.Ready():
@@ -176,7 +176,7 @@ in a service.Service:
 
 	runner := service.NewRunner(nil)
 	rn1, rn2 := &MyRunnable{}, &MyRunnable{}
-	svc1, svc2 := service.New(rn1), service.New(rn2)
+	svc1, svc2 := service.New("s1", rn1), service.New("s2", rn2)
 
 	// start svc1 and wait until it is ready:
 	err := runner.Start(context.TODO(), svc1)
