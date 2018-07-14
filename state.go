@@ -26,12 +26,9 @@ const (
 	Started
 	Halting
 	Ended
-
-	Running    = Starting | Started | Halting
-	NotRunning = NoState | Halted | Ended
 )
 
-var States = []State{Halting, Halted, Starting, Started}
+var States = []State{Halting, Halted, Starting, Started, Ended}
 
 func (s State) IsRunning() bool { return s == Starting || s == Started }
 

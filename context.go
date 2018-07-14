@@ -13,23 +13,32 @@ service is ready, to receive the signal to halt, or to relay non-fatal
 errors to the Runner's listener.
 
 All services must either include Context.Done() in their select loop, or
-regularly poll service.IsDone(ctx) if they don't make use of one.
+regularly poll ctx.ShouldHalt() if they don't make use of one.
 
 service.Context is a context.Context, so you can use it anywhere you would
-expect to be able to use a context.Context:
+expect to be able to use a context.Context and the thing you are using will
+be signalled when your service is halted:
 
 	func (s *MyService) Run(ctx service.Context) error {
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
 
-		dctx, cancel := context.WithDeadline(ctx, time.Now().Add(2 * time.Second))
+		rqCtx, cancel := context.WithDeadline(ctx, time.Now().Add(2 * time.Second))
 		defer cancel()
 
-		// This service will be "Done" either when the service is halted,
-		// or the deadline arrives (though in the latter case, the service
-		// will be considered to have ended prematurely)
-		<-dctx.Done()
+		client := &http.Client{}
+		rq, err := http.NewRequest("GET", "http://example.com", nil)
+		// ...
+
+		// The child context passed to the request will be "Done" either when
+		// the service is halted, or the deadline arrives, so this request will
+		// be aborted by the service being Halted:
+		rq = rq.WithContext(rqCtx)
+		rs, err := client.Do(rq)
+		// ...
+
+		<-ctx.Done()
 
 		return nil
 	}
@@ -38,11 +47,15 @@ expect to be able to use a context.Context:
 type Context interface {
 	context.Context
 
-	ShouldHalt() bool
-
 	// Ready MUST be called by all services when they have finished
-	// their setup routines and are considered "Ready" to run.
+	// their setup routines and are considered "Ready" to run. If
+	// Ready() returns an error, it MUST be immediately returned.
 	Ready() error
+
+	// ShouldHalt is used in situations where you can not block listening
+	// to <-Done(), but instead must poll to check if Run() should halt.
+	// Checking <-Done() in a select{} is preferred, but not always practical.
+	ShouldHalt() bool
 
 	// OnError is used to pass all non-fatal errors that do not cause the
 	// service to halt prematurely up to the runner's listener.

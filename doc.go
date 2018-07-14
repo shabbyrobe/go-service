@@ -7,31 +7,70 @@ long-running goroutines and control startup and shutdown.
 
 Quick Example
 
-	type MyService struct {}
+	type MyRunnable struct {}
 
-	func (m *MyService) ServiceName() service.Name { return "My service" }
+	func (m *MyRunnable) Run(ctx service.Context) error {
+		// Set up your stuff:
+		t := time.NewTicker()
+		defer t.Stop()
 
-	func (m *MyService) Run(ctx service.Context) error {
-		// note: service.Context is a context.Context
-
+		// Notify the Runner that we are 'ready', which will unblock the call
+		// Runner.Start().
+		//
+		// If you omit this, Start() will never unblock; failing to call Ready()
+		// in a Runnable is an error.
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		<-ctx.Done()
+
+		// Run the service, awaiting an instruction from the runner to Halt:
+		select {
+		case <-ctx.Done():
+		case t := <-tick:
+			fmt.Println(t)
+		}
+
 		return nil
 	}
 
-	func main() {
-		runner := service.NewRunner(nil)
-		svc := &MyService{}
-		if err := service.StartWait(runner, 1 * time.Second, svc); err != nil {
-			log.Fatal(err)
-		}
-		if err := runner.Halt(1 * time.Second, svc); err != nil {
-			log.Fatal(err)
-		}
-	}
+	func run() error {
+		runner := service.NewRunner()
 
+		// Ensure that every service is shut down within 10 seconds, or panic
+		// if the deadline is exceeded:
+		defer service.MustShutdownTimeout(10*time.Second, runner)
+
+		rn := &MyRunnable{}
+
+		// If you want to be notified if the service ends prematurely, attach
+		// an EndListener.
+		failer := service.NewFailureListener(1)
+		svc := service.New(rn).WithEndListener(failer)
+
+		// Start a service in the background. The call to Start will unblock when
+		// MyRunnable.Run() calls ctx.Ready():
+		if err := runner.Start(context.TODO(), svc); err != nil {
+			return err
+		}
+
+		after := time.After(10*time.Second)
+
+		select {
+		case <-after:
+			// Halt a service and wait for it to signal it finished:
+			if err := runner.Halt(context.TODO(), svc); err != nil {
+				return err
+			}
+
+		case err := <-failer.Failures():
+			// If something goes wrong and MyRunnable ends prematurely,
+			// the error returned by MyRunnable.Run() will be sent to the
+			// FailureListener.Failures() channel.
+			return err
+		}
+
+		return nil
+	}
 
 Performance
 
@@ -52,20 +91,25 @@ on, but this is not to say that optimising the library isn't important, it's
 just not a priority yet. YMMV.
 
 
-Services
+Runnables
 
-Services can be created by implementing the Service interface. This interface
-only contains two methods, but there are some very important caveats in order
-to correctly implement the Run() method.
+Runnables can be created by implementing the Runnable interface. This interface
+only contains one method (Run), but there are some very important caveats in order
+to correctly implement it:
 
-	type MyService struct {}
+	type MyRunnable struct {}
 
-	func (m *MyService) ServiceName() service.Name {
-		return "My service"
-	}
+	func (m *MyRunnable) Run(ctx service.Context) error {
+		// This MUST be present in every implementation of service.Runnable:
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
 
-	func (m *MyService) Run(ctx service.Context) error {
-		// valid Run() implementation
+		// You must wait for the signal to Halt. You can also poll
+		// ctx.ShouldHalt().
+		<-ctx.Done()
+
+		return nil
 	}
 
 The Run() method will be run in the background by a Runner. The Run() method
@@ -76,20 +120,21 @@ will result in Undefined Behaviour (uh-oh!):
 
 	- <-ctx.Done() MUST be included in any select {} block
 
-	- OR... service.IsDone(ctx) MUST be checked more frequently than your
-	  application's halt timeout if <-ctx.Done() is not used.
+	- OR... ctx.ShouldHalt() MUST be checked frequently enough that your
+	  calls to Halt() won't time out if <-ctx.Done() is not used.
 
 	- If Run() ends before it is halted by a Runner, an error MUST be returned.
 	  If there is no obvious application specific error to return in this case,
-	  ErrServiceEnded MUST be returned.
+	  service.ErrServiceEnded MUST be returned.
 
 The Run() method SHOULD do the following:
 
-	- service.Sleep(ctx) should be used instead of time.Sleep()
+	- service.Sleep(ctx) should be used instead of time.Sleep(); service.Sleep()
+	  is haltable.
 
 Here is an example of a Run() method which uses a select{} loop:
 
-	func (m *MyService) Run(ctx service.Context) error {
+	func (m *MyRunnable) Run(ctx service.Context) error {
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
@@ -109,57 +154,64 @@ Here is an example of a Run() method which sleeps:
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
-		for !ctx.IsDone() {
+		for !ctx.ShouldHalt() {
 			m.doThingsWithTheStuff(stuff)
 			service.Sleep(ctx, 1 * time.Second)
 		}
 		return nil
 	}
 
-service.Func allows you to use a bare function as a Service instead of
+service.RunnableFunc allows you to use a bare function as a Runnable instead of
 implementing the Service interface:
 
-	service.Func("My service", func(ctx service.Context) error {
+	service.RunnableFunc("My service", func(ctx service.Context) error {
 		// valid Run implementation
 	})
 
 
 Runners
 
-To start or halt a service, a Runner is required.
+To start or halt a Runnable, a Runner is required and the Runnable must be wrapped
+in a service.Service:
 
-	r := service.NewRunner(nil)
-	svc1, svc2 := &MyService{}, &MyService{}
+	runner := service.NewRunner(nil)
+	rn1, rn2 := &MyRunnable{}, &MyRunnable{}
+	svc1, svc2 := service.New(rn1), service.New(rn2)
 
-	// start, but don't wait until the service is ready:
-	err := r.Start(svc1)
+	// start svc1 and wait until it is ready:
+	err := runner.Start(context.TODO(), svc1)
 
-	// start another one and also don't wait:
-	err := r.Start(svc2)
+	// start svc1 and svc2 simultaneously and wait until both of them are ready:
+	err := runner.Start(context.TODO(), svc1, svc2)
 
-	// wait no more than 1 second each for both services to become ready (if
-	// there are 2 services, the maximum timeout will be 2 seconds)
-	err := service.WhenAllReady(1 * time.Second, svc1, svc2)
+	// start both services, but wait no more than 1 second for them both to be ready:
+	err := service.StartTimeout(1 * time.Second, runner, svc1, svc2)
+	if err != nil {
+		// You MUST attempt to halt the services if StartTimeout does not succeed:
+		service.MustHaltTimeout(1 * time.Second, runner, svc1, svc2)
+	}
 
-	// start another service and wait no more than 1 second until it's ready
-	// before returning:
-	svc := &MyService{}
-	err := service.StartWait(r, 1 * time.Second, svc)
-
-	// the above StartWait call is equivalent to the following (error handling
+	// the above StartTimeout call is equivalent to the following (error handling
 	// skipped for brevity):
-	svc := &MyService{}
-	err := r.Start(svc)
-	err := r.WhenReady(1 * time.Second, svc)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	err := runner.Start(ctx, svc1, svc2)
 
-	// now halt the service we just started, waiting no more than 1 second
-	// for the service to end:
-	err := r.Halt(1 * time.Second, svc)
+	// now halt the services we just started, unblocking when both services have
+	// ended or failed to end:
+	err := runner.Halt(context.TODO(), svc1, svc2)
+	if err != nil {
+		// If Halt() fails, we have probably leaked a resource. If you have no
+		// mechanism to recover it, it could be time to crash:
+		panic(err)
+	}
 
-	// halt every service currently started in the runner, waiting no more
-	// than 1 second for each service to be halted (if there are 3 services,
-	// the maximum timeout will be 3 seconds):
-	err := r.Shutdown(1 * time.Second)
+	// halt every service currently started in the runner:
+	err := runner.Shutdown(context.TODO())
+
+	// halt every service in the runner, waiting no more than 1 second for them
+	// to finish halting:
+	err := service.ShutdownTimeout(1*time.Second, runner)
 
 
 Contexts
@@ -168,7 +220,7 @@ Service.Run receives a service.Context as its first parameter. service.Context
 implements context.Context (https://golang.org/pkg/context/).
 
 service.Context can be used exactly as a context.Context is used for your
-service code:
+service code, with some caveats:
 
 	func (s *MyService) Run(ctx service.Context) error {
 		if err := ctx.Ready(); err != nil {

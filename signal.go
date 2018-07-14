@@ -16,7 +16,7 @@ func IsErrUsedDoneSignal(err error) bool  { return err == errUsedDoneSignal }
 
 type Signal interface {
 	Done(err error) (ok bool)
-	Waiter() <-chan error // FIXME: rename to Waiter()
+	Waiter() <-chan error
 }
 
 // MultiSignal coalesces multiple signals into a single error yielded to

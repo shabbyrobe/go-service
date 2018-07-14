@@ -9,14 +9,31 @@ import (
 
 // Runner Starts, Halts and manages Services.
 type Runner interface {
-	// Start one or more services in this runner and wait until they are Ready.
+	// Start one or more services in this runner and block until they are Ready.
+	//
+	// Start will unblock when all services have either signalled Ready or have
+	// returned an error indicating they have failed to start, or when the context
+	// provided to Start() is Done().
 	//
 	// An optional context can be provided via ctx; this allows cancellation to
 	// be declared outside the Runner. You may provide a nil Context.
 	//
+	// If ctx signals Done(), you should try to Halt() the service as you may
+	// leak a goroutine - the service may have become Ready() after you stopped
+	// waiting for it.
+	//
 	Start(ctx context.Context, services ...*Service) error
 
-	// Halt one or more services that have been started in this runner.
+	// Halt one or more services that have been started in this runner and block
+	// until they have halted.
+	//
+	// Halt will unblock when all services have finished halting. If Halt returns
+	// an error, one or more of the services may have failed to halt. If a service
+	// fails to Halt(), you may have leaked a goroutine and you should probably
+	// panic().
+	//
+	// You may Halt() a service in any state. If the service is already Halted
+	// or has already Ended, Halt will immediately succeed for that service.
 	//
 	// An optional context can be provided via ctx; this allows cancellation to
 	// be declared outside the Runner. You may provide a nil Context.
@@ -31,7 +48,7 @@ type Runner interface {
 	Halt(ctx context.Context, services ...*Service) error
 
 	// Shutdown halts all services started in this runner and prevents new ones
-	// from being started.
+	// from being started. It will block until all services have Halted.
 	//
 	// If any service fails to halt, err will contain an error for each service
 	// that failed, accessible by calling service.Errors(err). n will contain
@@ -51,8 +68,7 @@ type Runner interface {
 	// does not shut down existing services.
 	Suspend() error
 
-	// FIXME:
-	// RunnerState() RunnerState
+	RunnerState() RunnerState
 
 	State(svc *Service) State
 
@@ -100,6 +116,13 @@ func NewRunner(opts ...RunnerOption) Runner {
 		o(rn)
 	}
 	return rn
+}
+
+func (rn *runner) RunnerState() (out RunnerState) {
+	rn.mu.Lock()
+	out = rn.state
+	rn.mu.Unlock()
+	return out
 }
 
 func (rn *runner) Enable() error {

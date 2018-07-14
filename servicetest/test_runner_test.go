@@ -703,7 +703,7 @@ func TestRunnerHaltWhileHalting(t *testing.T) {
 	// Weak test... BlockingService sleeps for haltDelay and the two halts
 	// should finish at roughly the same time, but the reliability of this
 	// will be affected by tscale.
-	tt.MustAssert(diff < haltDelay/10)
+	tt.MustAssert(diff < haltDelay/10, "%s", diff)
 }
 
 func TestRunnerHaltOverlap(t *testing.T) {

@@ -11,6 +11,13 @@ func New(n Name, r Runnable) *Service {
 	return &Service{Name: n, Runnable: r}
 }
 
+func (s *Service) WithEndListener(endable interface {
+	AttachEnd(svc *Service)
+}) *Service {
+	endable.AttachEnd(s)
+	return s
+}
+
 type Runnable interface {
 	// Run the service, blocking the caller until the service is complete.
 	// ready MUST not be nil. ctx.Ready() MUST be called.

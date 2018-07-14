@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/golib/iotools"
 	"github.com/shabbyrobe/golib/synctools"
 )
 
@@ -61,7 +59,6 @@ func TestMain(m *testing.M) {
 	synctools.LoggingMutexWriter = ioutil.Discard
 	f, _ := os.Create("/tmp/x")
 	defer f.Close()
-	service.Junk = iotools.NewLockedWriter(f)
 
 	flag.BoolVar(&fuzzEnabled, "service.fuzz", false,
 		"Fuzz? Nope by default.")

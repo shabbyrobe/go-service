@@ -2,14 +2,10 @@ package service
 
 import (
 	"context"
-	"io"
-	"io/ioutil"
 	"sync"
 	"time"
 	// "github.com/shabbyrobe/golib/synctools"
 )
-
-var Junk io.Writer = ioutil.Discard
 
 type runnerService struct {
 	id      uint64
