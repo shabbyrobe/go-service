@@ -1,4 +1,4 @@
-package service
+package signal
 
 import (
 	"context"
@@ -180,10 +180,29 @@ func (ms *multiSignal) Waiter() <-chan error {
 		if len(errs) == 1 {
 			ret = errs[0]
 		} else if len(errs) > 1 {
-			ret = &serviceErrors{errors: errs}
+			ret = &errGroup{errors: errs}
 		}
 		c <- ret
 	}()
 
 	return c
+}
+
+type errGroup struct {
+	errors []error
+}
+
+func (e errGroup) Error() string {
+	out := ""
+	for i, c := range e.errors {
+		if i > 0 {
+			out += ", "
+		}
+		out += c.Error()
+	}
+	return out
+}
+
+func (e errGroup) Errors() []error {
+	return e.errors
 }

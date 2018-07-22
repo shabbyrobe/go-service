@@ -27,9 +27,7 @@ func TestHTTP(t *testing.T) {
 	defer service.MustShutdownTimeout(1*time.Second, runner)
 	tt.MustOK(service.StartTimeout(1*time.Second, runner, service.New("http", h)))
 
-	fmt.Println(1)
 	hc, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", h.Port()))
-	fmt.Println(2)
 	tt.MustOK(err)
 	b, err := ioutil.ReadAll(hc.Body)
 	tt.MustOK(err)

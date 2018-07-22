@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/shabbyrobe/go-service/signal"
 	// "github.com/shabbyrobe/golib/synctools"
 )
 
@@ -168,18 +170,18 @@ func (rn *runner) Suspend() error {
 }
 
 func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
-	var signal Signal
+	var sg signal.Signal
 
 	if err := func() error {
 		rn.mu.Lock()
 		defer rn.mu.Unlock()
 
-		signal = NewMultiSignal(len(rn.services))
+		sg = signal.NewMultiSignal(len(rn.services))
 
 		rn.state = RunnerShutdown
 
 		for _, rs := range rn.services {
-			if err := rs.halting(signal); err != nil {
+			if err := rs.halting(sg); err != nil {
 				panic(err)
 			}
 		}
@@ -195,7 +197,7 @@ func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
 	}
 
 	select {
-	case err := <-signal.Waiter():
+	case err := <-sg.Waiter():
 		return err
 
 	case <-ctxDone:
@@ -217,7 +219,7 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 		return fmt.Errorf("runner is not enabled")
 	}
 
-	ready := NewSignal(svcLen)
+	ready := signal.NewSignal(svcLen)
 
 	var errs []error
 
@@ -282,7 +284,7 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 		return nil
 	}
 
-	done := NewSignal(svcLen)
+	done := signal.NewSignal(svcLen)
 
 	var errs []error
 

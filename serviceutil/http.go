@@ -3,7 +3,6 @@ package serviceutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -121,7 +120,6 @@ func (h *HTTP) Run(ctx service.Context) (rerr error) {
 
 	select {
 	case err := <-failer.Failures():
-		fmt.Println(err)
 		return err
 	case <-ctx.Done():
 		return nil

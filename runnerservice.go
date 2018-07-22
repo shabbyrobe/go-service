@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/shabbyrobe/go-service/signal"
 )
 
 type runnerService struct {
@@ -14,9 +16,9 @@ type runnerService struct {
 
 	state      State
 	startCtx   context.Context
-	ready      Signal
+	ready      signal.Signal
 	stage      Stage
-	waiters    []Signal
+	waiters    []signal.Signal
 	done       <-chan struct{}
 	halt       chan struct{}
 	joinedDone *joinedDone
@@ -28,7 +30,7 @@ type runnerService struct {
 
 var _ Context = &runnerService{}
 
-func newRunnerService(id uint64, r *runner, svc *Service, ready Signal) *runnerService {
+func newRunnerService(id uint64, r *runner, svc *Service, ready signal.Signal) *runnerService {
 	rs := &runnerService{
 		id:      id,
 		state:   Halted,
@@ -76,7 +78,7 @@ func (rs *runnerService) starting(ctx context.Context) error {
 	return nil
 }
 
-func (rs *runnerService) halting(done Signal) (rerr error) {
+func (rs *runnerService) halting(done signal.Signal) (rerr error) {
 	rs.mu.Lock()
 	if rs.state == NoState || rs.state == Halted || rs.state == Ended {
 		rs.mu.Unlock()

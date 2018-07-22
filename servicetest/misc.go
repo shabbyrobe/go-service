@@ -40,9 +40,9 @@ type runnerWithFailingStart struct {
 	err error
 }
 
-func (t *runnerWithFailingStart) Start(ctx context.Context, svc *service.Service, ready service.Signal) (rerr error) {
+func (t *runnerWithFailingStart) Start(ctx context.Context, svcs ...*service.Service) (rerr error) {
 	if t.failAfter > 0 {
-		rerr = t.Runner.Start(ctx, svc)
+		rerr = t.Runner.Start(ctx, svcs...)
 		t.failAfter--
 	} else {
 		rerr = t.err
