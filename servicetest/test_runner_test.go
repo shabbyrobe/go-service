@@ -16,9 +16,8 @@ import (
 
 // TODO:
 // - Test every state transition using a state listener to control advancement
-// - Test reusable memory for runner.Services()
-// - Make sure multiple calls to halt a running service all unblock at the same time
 // - Verify nil contexts work for Start(), Halt() and Shutdown()
+// - Multiple halts, multiple starts
 
 const haltableStates = service.Starting | service.Started | service.Halting
 
@@ -149,6 +148,27 @@ func TestRunnerStartMultiple(t *testing.T) {
 	sr1 := (&BlockingService{}).Init()
 	sr2 := (&BlockingService{}).Init()
 	s1, s2 := service.New("", sr1), service.New("", sr2)
+	r := service.NewRunner()
+
+	tt.MustOK(r.Start(nil, s1, s2))
+	tt.MustOK(service.HaltTimeout(dto, r, s1, s2))
+	tt.MustAssert(r.State(s1) == service.Halted)
+	tt.MustAssert(r.State(s1) == service.Halted)
+}
+
+func TestRunnerHaltMultiple(t *testing.T) {
+	tt := assert.WrapTB(t)
+
+	rn := service.RunnableFunc(func(ctx service.Context) error {
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		time.Sleep(tscale * 10)
+		return nil
+	})
+
+	s1, s2 := service.New("", rn), service.New("", rn)
 	r := service.NewRunner()
 
 	tt.MustOK(r.Start(nil, s1, s2))
@@ -536,6 +556,25 @@ func TestRunnerServices(t *testing.T) {
 		assertServices(nil, service.Halted, 0)
 		assertServices(nil, service.Started, 0)
 	}
+}
+
+func TestRunnerServicesReusableMemory(t *testing.T) {
+	tt := assert.WrapTB(t)
+
+	s1 := service.New("1", (&BlockingService{}).Init())
+	s2 := service.New("2", (&BlockingService{}).Init())
+	r := service.NewRunner()
+	defer service.MustShutdownTimeout(1*time.Second, r)
+
+	tt.MustOK(service.StartTimeout(dto, r, s1))
+	tt.MustOK(service.StartTimeout(dto, r, s2))
+
+	into := make([]service.ServiceInfo, 0)
+	out := r.Services(service.AnyState, 0, into)
+	tt.MustEqual(2, cap(out))
+
+	next := r.Services(service.AnyState, 0, out)
+	tt.MustEqual(2, cap(next))
 }
 
 func TestRunnerServiceFunc(t *testing.T) {

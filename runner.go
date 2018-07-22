@@ -87,7 +87,31 @@ type Runner interface {
 
 type RunnerOption func(rn *runner)
 
-func RunnerOnEnd(cb OnEnd) RunnerOption                { return func(rn *runner) { rn.onEnd = cb } }
+// RunnerOnEnd supplies a default OnEnd callback for use in a Runner.
+//
+// Your OnEnd function will always be called if a Runnable's Run() function
+// returns, whether that is because the service failed prematurely or because
+// it was halted. If the service has ended because it was halted, err will be
+// nil. If the service has ended for any other reason, err MUST contain an
+// error.
+//
+// The Runner will be locked while your callback is in progress. You should return
+// as quickly as possible. It is not safe to call methods on a Runner from the
+// OnEnd callback; doing so may cause your application to deadlock. If you need
+// to call the Runner, wrap the body of your OnEnd in an anonymous goroutine:
+//
+//	RunnerOnEnd(func(stage Stage, service *Service, err error) {
+//		// Safe:
+//		go func() {
+//			runner.Start(...)
+//		}()
+//
+//		// NOT SAFE:
+//		runner.Start(...)
+//	})
+//
+func RunnerOnEnd(cb OnEnd) RunnerOption { return func(rn *runner) { rn.onEnd = cb } }
+
 func RunnerOnError(cb OnError) RunnerOption            { return func(rn *runner) { rn.onError = cb } }
 func RunnerOnState(ch chan<- StateChange) RunnerOption { return func(rn *runner) { rn.onState = ch } }
 
@@ -320,6 +344,7 @@ func (rn *runner) Services(query State, limit int, into []ServiceInfo) []Service
 	if len(into) == 0 {
 		into = make([]ServiceInfo, 0, limit)
 	}
+	into = into[:0]
 
 	n := 0
 	for service, rs := range rn.services {
@@ -405,16 +430,16 @@ func (rn *runner) ended(rsvc *runnerService, err error) error {
 
 func (rn *runner) raiseOnEnded(stage Stage, service *Service, err error) {
 	if rn.onEnd != nil {
-		go rn.onEnd(stage, service, err)
+		rn.onEnd(stage, service, err)
 	}
 	if service.OnEnd != nil {
-		go service.OnEnd(stage, service, err)
+		service.OnEnd(stage, service, err)
 	}
 }
 
 func (rn *runner) raiseOnError(stage Stage, service *Service, err error) {
 	if rn.onError != nil {
-		go rn.onError(stage, service, err)
+		rn.onError(stage, service, err)
 	}
 }
 

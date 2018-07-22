@@ -4,6 +4,10 @@ Package service implements service-like goroutine lifecycle management.
 It is intended for use when you need to co-ordinate the state of one or more
 long-running goroutines and control startup and shutdown.
 
+Package service is complemented by the
+'github.com/shabbyrobe/go-service/services' package, which provides a global
+version of a service.Runner for use in simpler applications.
+
 
 Quick Example
 
@@ -11,8 +15,8 @@ Quick Example
 
 	func (m *MyRunnable) Run(ctx service.Context) error {
 		// Set up your stuff:
-		t := time.NewTicker()
-		defer t.Stop()
+		tick := time.NewTicker()
+		defer tick.Stop()
 
 		// Notify the Runner that we are 'ready', which will unblock the call
 		// Runner.Start().
@@ -26,7 +30,7 @@ Quick Example
 		// Run the service, awaiting an instruction from the runner to Halt:
 		select {
 		case <-ctx.Done():
-		case t := <-tick:
+		case t := <-tick.C:
 			fmt.Println(t)
 		}
 
@@ -199,8 +203,7 @@ in a service.Service:
 
 	// now halt the services we just started, unblocking when both services have
 	// ended or failed to end:
-	err := runner.Halt(context.TODO(), svc1, svc2)
-	if err != nil {
+	if err := runner.Halt(context.TODO(), svc1, svc2); err != nil {
 		// If Halt() fails, we have probably leaked a resource. If you have no
 		// mechanism to recover it, it could be time to crash:
 		panic(err)
@@ -219,8 +222,9 @@ Contexts
 Service.Run receives a service.Context as its first parameter. service.Context
 implements context.Context (https://golang.org/pkg/context/).
 
-service.Context can be used exactly as a context.Context is used for your
-service code, with some caveats:
+You should use the ctx as the basis for any child contexts you wish to create
+in your service, as you will then gain access to cancellation propagation from
+Runner.Halt():
 
 	func (s *MyService) Run(ctx service.Context) error {
 		if err := ctx.Ready(); err != nil {
@@ -238,73 +242,92 @@ service code, with some caveats:
 		// If the service wasn't halted (i.e. if the deadline elapsed), we must
 		// return an error to satisfy the service.Run contract outlined in the
 		// docs:
-		if !ctx.IsDone() {
-			returh errServiceEnded
-		}
+		return dctx.Err()
+	}
 
+The rules around when the ctx passed to Run() is considered Done() are different
+depending on whether ctx.Ready() has been called. If ctx.Ready() has not yet been
+called, the ctx passed to Run() is Done() if:
+
+	- The service is halted using Runner.Halt()
+	- The context passed to Runner.Start() is either cancelled or its deadline
+	  is exceeded.
+
+If ctx.Ready() has been called, the ctx passed to Run() is Done() if:
+
+	- The service is halted using Runner.Halt()
+	- That's it.
+
+The context passed to Runner.Halt() is not bound to the ctx passed to Run(). The
+rationale for this decision is that if you need to do things in your service that
+require a context.Context after Run's ctx is Done() (i.e. when your Runnable is
+Halting), you are responsible for creating your own context:
+
+	func (s *MyService) Run(ctx service.Context) error {
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		<-ctx.Done()
 		return nil
 	}
 
-Services can not work without a cancelable context (how else would you implement
-runner.Halt?), so the service package assumes control of context creation. This
-is not ideal, but the context package provides no mechanism to detect whether a
-context has been wrapped with WithCancel, and no way to access the cancel()
-function via the context.Context itself. I haven't found a good way of allowing
-externally created contexts to be passed in without totally destroying the API
-yet, but it's definitely something I'm looking into.
+The guideline for this may change, but at the moment the best recommendation is
+to use context.Background() in this case: if you are calling Runner.Halt() and
+your context deadline runs out, you have lost resources no matter what.
 
 
 Listeners
 
-Errors may happen during a service's execution. Services may end prematurely.
-If these kinds of things happen, the parent context may wish to be notified via
-a Listener.
+Runner takes a list of functional RunnerOptions that can be used to listen
+to events.
 
-NewRunner() takes an implementation of the Listener interface:
+The RunnerOnEnd option allows you to supply a callback which is executed
+when a service ends:
 
-	type MyListener struct {}
-
-	func (m *MyListener) OnServiceEnd(stage Stage, service Service, err Error) {
-		// This will always be called for every service whose Run() method
-		// stops, whether normally or in error, but will not be called if the
-		// service panics.
+	endFn := func(stage Stage, service *Service, err error) {
+		// behaviour you want when a service ends before it is halted
 	}
+	r := service.NewRunner(service.RunnerOnEnd(endFn))
 
-	func main() {
-		l := &MyListener{}
-		r := NewRunnner(l)
-		// ...
+OnEnd will always be called if a Runnable's Run() function returns, whether
+that is because the service failed prematurely or because it was halted. If the
+service has ended because it was halted, err will be nil. If the service has
+ended for any other reason, err MUST contain an error.
+
+The RunnerOnError option allows you to supply a callback which is executed
+when a service calls service.Context.OnError(err). Context.OnError(err) is
+used when an error occurs that cannot be handled and does not terminate the
+service. It's most useful for logging:
+
+	errorFn := func(stage Stage, service *Service, err error) {
+		log.Println(service.Name, err)
 	}
+	r := service.NewRunner(service.RunnerOnError(endFn))
 
-Every call to Runner.Start or service.StartWait is matched with a call to
-OnServiceEnd, regardless of whether the call to Start failed at any stage,
-ended prematurely, or was halted by Runner.Halt. The err argument will be nil
-if the service was halted, but MUST be an error in any other circumstance.
+You MUST NOT attempt to call your Runner from inside your OnEnd or OnError
+function. This will cause a deadlock. If you wish to call the runner, wrap
+your function body in an anonymous goroutine:
 
-The Listener may also optionally implement service.ErrorListener and/or
-service.StateListener:
+	endFn := func(stage Stage, service *Service, err error) {
+		// Safe:
+		go func() {
+			err := runner.Start(...)
+		}()
 
-	func (m *MyListener) OnServiceError(service Service, err Error) {
-		// This will be called every time you call ctx.OnError() in your
-		// service so non-fatal errors that occur during the lifetime
-		// of your service have a place to go.
-	}
-
-	func (m *MyListener) OnServiceState(service Service, state State) {
-		// This is called whenever a service transitions into a state.
+		// NOT SAFE:
+		err := runner.Start(...)
 	}
 
 
 Restarting
 
-All services can be restarted if they are stopped by default. If written
-carefully, it's also possible to start the same Service in multiple Runners.
-Maybe that's not a good idea, but who am I to judge? You might have a great
-reason.
+All Runnable implementations are restartable by default. If written carefully,
+it's also possible to start the same Runnable in multiple Runners. Maybe that's
+not a good idea, but who am I to judge? You might have a great reason.
 
-Some services may wish to explicitly block restart, such as services that
-wrap a net.Conn (which will not be available if the service fails). An
-atomic can be a good tool for this job:
+Some Runnable implementations may wish to explicitly block restart, such as
+tings that wrap a net.Conn (which will not be available if the service fails).
+An atomic can be a good tool for this job:
 
 	type MyService struct {
 		used int32

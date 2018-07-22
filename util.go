@@ -11,6 +11,18 @@ func StartTimeout(timeout time.Duration, runner Runner, services ...*Service) er
 	return runner.Start(ctx, services...)
 }
 
+func MustStart(ctx context.Context, runner Runner, services ...*Service) {
+	if err := runner.Start(ctx, services...); err != nil {
+		panic(err)
+	}
+}
+
+func MustStartTimeout(timeout time.Duration, runner Runner, services ...*Service) {
+	if err := StartTimeout(timeout, runner, services...); err != nil {
+		panic(err)
+	}
+}
+
 func HaltTimeout(timeout time.Duration, runner Runner, services ...*Service) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

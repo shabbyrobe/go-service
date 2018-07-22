@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	// "github.com/shabbyrobe/golib/synctools"
 )
 
 type runnerService struct {
@@ -25,8 +24,9 @@ type runnerService struct {
 	readyCalled bool
 
 	mu sync.Mutex
-	// mu synctools.LoggingMutex
 }
+
+var _ Context = &runnerService{}
 
 func newRunnerService(id uint64, r *runner, svc *Service, ready Signal) *runnerService {
 	rs := &runnerService{
@@ -42,6 +42,8 @@ func newRunnerService(id uint64, r *runner, svc *Service, ready Signal) *runnerS
 	rs.done = rs.halt
 	return rs
 }
+
+func (rs *runnerService) Runner() Runner { return rs.runner }
 
 func (rs *runnerService) State() (state State) {
 	rs.mu.Lock()

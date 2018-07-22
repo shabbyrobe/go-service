@@ -9,6 +9,4 @@ var (
 func init() {
 	close(closedErr)
 	close(closedBlank)
-
-	GlobalReset(nil)
 }

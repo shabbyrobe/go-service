@@ -68,7 +68,7 @@ func TestSignalAwaitError(t *testing.T) {
 
 	srs := NewSignal(1).(*signal)
 	err := errors.New("yep")
-	tt.MustOK(srs.Done(err))
+	tt.MustAssert(srs.Done(err))
 
 	tt.MustEqual(err, AwaitSignalTimeout(tscale, srs))
 	assertWaiterEmpty(tt, srs.Waiter())
@@ -78,7 +78,7 @@ func TestSignalAwaitNil(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	srs := NewSignal(1).(*signal)
-	tt.MustOK(srs.Done(nil))
+	tt.MustAssert(srs.Done(nil))
 	tt.MustOK(AwaitSignalTimeout(tscale, srs))
 	assertWaiterEmpty(tt, srs.Waiter())
 }

@@ -3,6 +3,10 @@
 - Metafuzz parameters from an input argument
 - Document usage patterns
 - fuzzer runnerWithFailingStart chance
-- make dummy service registry in serviceutil to validate that it's possible
 - unique incrementing id for every service start so you can tell if it actually happened.
+- Atomic restartable services
+
+- Fuzzer should count time service was running; could be evidence of failure if
+  the average run time of a service does not match the bounds established by
+  the randomised times.
 

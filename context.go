@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// MinHaltableSleep specifies the minimum amount of time that you must
+// pass to service.Sleep() if you want the Sleep() to be cancellable
+// from a context. Calls to service.Sleep() with a duration smaller than
+// this will simply call time.Sleep().
 const MinHaltableSleep = 50 * time.Millisecond
 
 /*
@@ -60,6 +64,8 @@ type Context interface {
 	// OnError is used to pass all non-fatal errors that do not cause the
 	// service to halt prematurely up to the runner's listener.
 	OnError(err error)
+
+	Runner() Runner
 }
 
 // Sleep allows a service to perform an interruptible sleep - it will

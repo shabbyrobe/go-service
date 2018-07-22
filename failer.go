@@ -31,7 +31,7 @@ func (f *FailureListener) Failures() <-chan error {
 	return f.failures
 }
 
-func (f *FailureListener) Attach(svc *Service)     { svc.OnEnd = f.OnEnd }
+func (f *FailureListener) AttachEnd(svc *Service)  { svc.OnEnd = f.OnEnd }
 func (f *FailureListener) ForRunner() RunnerOption { return RunnerOnEnd(f.OnEnd) }
 
 // SendNonNil sends an arbitrary error through the failure channel if it is not nil.
@@ -94,7 +94,7 @@ func (e *EndListener) Ends() <-chan error {
 	return e.ends
 }
 
-func (e *EndListener) Attach(svc *Service)     { svc.OnEnd = e.OnEnd }
+func (e *EndListener) AttachEnd(svc *Service)  { svc.OnEnd = e.OnEnd }
 func (e *EndListener) ForRunner() RunnerOption { return RunnerOnEnd(e.OnEnd) }
 
 // Send sends an arbitrary error through the failure channel. It can send nil.
