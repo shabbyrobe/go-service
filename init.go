@@ -1,11 +1,14 @@
 package service
 
-// closed will return a permanently closed channel. It allows <-Ready()
-// to be called multiple times for a completed signal that can't be re-used.
-var closed = make(chan error)
+// closedErr is a permanently closed channel (see init())
+var (
+	closedErr   = make(chan error)
+	closedBlank = make(chan struct{})
+)
 
 func init() {
-	close(closed)
+	close(closedErr)
+	close(closedBlank)
 
 	GlobalReset(nil)
 }

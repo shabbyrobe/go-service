@@ -3,6 +3,7 @@ package serviceutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -12,52 +13,6 @@ import (
 )
 
 const DefaultShutdownTimeout = 5 * time.Second
-
-// ListenAndServeHTTP allows you to use this very convenient method
-// but, unlike the stdlib version, also get a signal when it's ready.
-//
-// Several bowls of copy-pasta were harmed in the making of this
-// function.
-//
-func ListenAndServeHTTP(srv *http.Server, ready Ready) error {
-	addr := srv.Addr
-	if addr == "" {
-		addr = ":http"
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	if err := ready.Ready(); err != nil {
-		return err
-	}
-	return srv.Serve(tcpKeepAliveListener{TCPListener: ln.(*net.TCPListener)})
-}
-
-// ListenAndServeTLS allows you to use this very convenient method
-// but, unlike the stdlib version, also get a signal when it's ready.
-//
-// Several bowls of copy-pasta were harmed in the making of this
-// function.
-//
-// If your server contains TLSConfig with populated certificates, you can pass
-// an empty string for both certFile and keyFile.
-//
-func ListenAndServeTLS(srv *http.Server, certFile, keyFile string, ready Ready) error {
-	addr := srv.Addr
-	if addr == "" {
-		addr = ":https"
-	}
-
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	if err := ready.Ready(); err != nil {
-		return err
-	}
-	return srv.ServeTLS(tcpKeepAliveListener{TCPListener: ln.(*net.TCPListener)}, certFile, keyFile)
-}
 
 // HTTP wraps a http.Server in a service.Service.
 type HTTP struct {
@@ -133,7 +88,7 @@ func (h *HTTP) Run(ctx service.Context) (rerr error) {
 	failer := service.NewFailureListener(1)
 
 	go func() {
-		close(done)
+		defer close(done)
 		defer atomic.StoreInt32(&h.port, 0)
 
 		ln, err := net.Listen("tcp", h.addr())
@@ -166,6 +121,7 @@ func (h *HTTP) Run(ctx service.Context) (rerr error) {
 
 	select {
 	case err := <-failer.Failures():
+		fmt.Println(err)
 		return err
 	case <-ctx.Done():
 		return nil

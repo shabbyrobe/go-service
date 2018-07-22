@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 	// "github.com/shabbyrobe/golib/synctools"
 )
@@ -12,13 +13,15 @@ type runnerService struct {
 	service *Service // safe to access unlocked
 	runner  *runner  // safe to access unlocked
 
-	state       State
-	startCtx    context.Context
-	ready       Signal
-	stage       Stage
-	waiters     []Signal
-	done        <-chan struct{}
-	halt        chan struct{}
+	state      State
+	startCtx   context.Context
+	ready      Signal
+	stage      Stage
+	waiters    []Signal
+	done       <-chan struct{}
+	halt       chan struct{}
+	joinedDone *joinedDone
+
 	readyCalled bool
 
 	mu sync.Mutex
@@ -58,10 +61,13 @@ func (rs *runnerService) starting(ctx context.Context) error {
 
 	rs.startCtx = ctx
 	if ctx != nil {
-		rs.done = join(rs.halt, ctx.Done())
-	} else {
-		rs.done = rs.halt
+		cd := ctx.Done()
+		if cd != nil {
+			rs.joinedDone = joinDone(rs.halt, cd)
+			rs.done = rs.joinedDone.out
+		}
 	}
+
 	rs.setState(Starting)
 
 	rs.mu.Unlock()
@@ -99,7 +105,11 @@ func (rs *runnerService) setReady(err error) {
 
 	rs.startCtx = nil
 	rs.readyCalled = true
-	rs.done = rs.halt
+
+	if rs.joinedDone != nil {
+		rs.joinedDone.setReady()
+	}
+
 	if err == nil {
 		rs.stage = StageRun
 	}
@@ -190,18 +200,40 @@ func (rs *runnerService) Value(key interface{}) (out interface{}) {
 	return out
 }
 
-func join(done chan struct{}, ctxDone <-chan struct{}) chan struct{} {
-	if ctxDone == nil {
-		return done
+type joinedDone struct {
+	halt           chan struct{}
+	startCtx       <-chan struct{}
+	out            chan struct{}
+	ignoreStartCtx int32
+}
+
+func (j *joinedDone) setReady() {
+	atomic.StoreInt32(&j.ignoreStartCtx, 1)
+}
+
+func joinDone(halt chan struct{}, startCtx <-chan struct{}) *joinedDone {
+	out := make(chan struct{})
+	jd := &joinedDone{
+		halt:     halt,
+		startCtx: startCtx,
+		out:      out,
 	}
 
-	o := make(chan struct{})
 	go func() {
 		select {
-		case <-done:
-		case <-ctxDone:
+		case <-halt:
+			close(out)
+		case <-startCtx:
+			if atomic.LoadInt32(&jd.ignoreStartCtx) == 1 {
+				<-halt
+			}
+
+			// Clear channel to allow the context.Context to be garbage collected:
+			jd.startCtx = nil
+
+			close(out)
 		}
-		close(o)
 	}()
-	return o
+
+	return jd
 }

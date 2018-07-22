@@ -13,19 +13,26 @@ import (
 // - NewSignal(0)
 // - NewMultiSignal(2)
 
+func assertWaiterEmpty(tt assert.T, w <-chan error) {
+	tt.Helper()
+	select {
+	case v := <-w:
+		tt.Error("expected no receive, found", v)
+	default:
+	}
+}
+
 func TestSignalPutNil(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	srs := NewSignal(1).(*signal)
 	tt.MustAssert(srs.Done(nil))
 	tt.MustOK(<-srs.Waiter())
-	tt.MustOK(<-srs.Waiter())
+	assertWaiterEmpty(tt, srs.Waiter())
 
-	// Make sure we can't call Done again after
+	// Subsequent calls to 'done' should not push anything into the channel:
 	tt.MustAssert(!srs.Done(nil))
-
-	// Subsequent calls to Waiter() should immediately yield
-	tt.MustAssert(!srs.Done(errors.New("yep")))
+	assertWaiterEmpty(tt, srs.Waiter())
 }
 
 func TestSignalPutError(t *testing.T) {
@@ -35,17 +42,15 @@ func TestSignalPutError(t *testing.T) {
 	err := errors.New("yep")
 	tt.MustAssert(srs.Done(err))
 	tt.MustEqual(err, <-srs.Waiter())
-	tt.MustOK(<-srs.Waiter())
+	assertWaiterEmpty(tt, srs.Waiter())
 
-	// Subsequent calls to Waiter() should immediately yield
-	tt.MustOK(<-srs.Waiter())
-
-	// Make sure we can't call Done again after
+	// Subsequent calls to 'done' should not push anything into the channel:
 	tt.MustAssert(!srs.Done(nil))
 	tt.MustAssert(!srs.Done(err))
+	assertWaiterEmpty(tt, srs.Waiter())
 }
 
-func TestSignalWhenWaiterTimeout(t *testing.T) {
+func TestSignalAwaitTimeout(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	srs := NewSignal(1).(*signal)
@@ -53,33 +58,29 @@ func TestSignalWhenWaiterTimeout(t *testing.T) {
 	err := AwaitSignalTimeout(tscale, srs)
 	tt.MustEqual(err, context.DeadlineExceeded)
 
-	tt.MustEqual(int32(1), atomic.LoadInt32(&srs.signalled))
+	tt.MustEqual(int32(0), atomic.LoadInt32(&srs.signalled))
 
-	// The signal should be cancelled, so receiving on Waiter should return
-	// immediately.
-	tt.MustOK(<-srs.Waiter())
+	assertWaiterEmpty(tt, srs.Waiter())
 }
 
-func TestSignalWhenWaiterError(t *testing.T) {
+func TestSignalAwaitError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	srs := NewSignal(1).(*signal)
 	err := errors.New("yep")
-	srs.Done(err)
+	tt.MustOK(srs.Done(err))
 
 	tt.MustEqual(err, AwaitSignalTimeout(tscale, srs))
-
-	tt.MustOK(<-srs.Waiter())
+	assertWaiterEmpty(tt, srs.Waiter())
 }
 
-func TestSignalWhenWaiter(t *testing.T) {
+func TestSignalAwaitNil(t *testing.T) {
 	tt := assert.WrapTB(t)
 
 	srs := NewSignal(1).(*signal)
-	srs.Done(nil)
+	tt.MustOK(srs.Done(nil))
 	tt.MustOK(AwaitSignalTimeout(tscale, srs))
-
-	tt.MustOK(<-srs.Waiter())
+	assertWaiterEmpty(tt, srs.Waiter())
 }
 
 func TestMultiWaiterSignal(t *testing.T) {

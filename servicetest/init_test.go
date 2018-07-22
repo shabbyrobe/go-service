@@ -5,7 +5,6 @@ import (
 	"expvar"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	netprof "net/http/pprof"
 	"os"
@@ -14,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/shabbyrobe/golib/synctools"
 )
 
 const (
@@ -56,10 +53,6 @@ func setCurrentFuzzer(fz *RunnerFuzzer) {
 }
 
 func TestMain(m *testing.M) {
-	synctools.LoggingMutexWriter = ioutil.Discard
-	f, _ := os.Create("/tmp/x")
-	defer f.Close()
-
 	flag.BoolVar(&fuzzEnabled, "service.fuzz", false,
 		"Fuzz? Nope by default.")
 	flag.BoolVar(&fuzzServices, "service.fuzzservices", true,

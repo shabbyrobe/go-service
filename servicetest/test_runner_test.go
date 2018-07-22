@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,13 +32,15 @@ func mustStateError(tt assert.T, err error, expected service.State, current serv
 		fmt.Sprintf("assertion failed: expected %q, found %q", expstr, err.Error()))
 }
 
-func mustRecv(tt assert.T, waiter Waiter, timeout time.Duration) {
+func mustRecv(tt assert.T, c <-chan error, timeout time.Duration) error {
 	tt.Helper()
 	after := time.After(timeout)
 	select {
-	case <-waiter.C():
+	case err := <-c:
+		return err
 	case <-after:
 		tt.Fatalf("waiter did not yield within timeout %v", timeout)
+		return nil
 	}
 }
 
@@ -119,7 +122,7 @@ func TestRunnerHalt(t *testing.T) {
 	tt.MustOK(service.StartTimeout(dto, r, s2))
 	tt.MustEqual(context.DeadlineExceeded, service.HaltTimeout(1*time.Nanosecond, r, s2))
 	close(sr2.halt)
-	mustRecv(tt, e2, dto)
+	mustRecv(tt, e2.C(), dto)
 }
 
 func TestRunnerSameServiceMultipleRunners(t *testing.T) {
@@ -164,8 +167,41 @@ func TestRunnerStartServiceEnds(t *testing.T) {
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(r.Start(nil, s1, nil))
-	mustRecv(tt, ew, dto)
+	mustRecv(tt, ew.C(), dto)
 	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageRun, Err: service.ErrServiceEnded}}, lc.Ends(s1))
+}
+
+func TestRunnerServiceEndedCausesContextToBeDone(t *testing.T) {
+	tt := assert.WrapTB(t)
+
+	// Don't try to receive from ctx.Done() until after the service has ended
+	// in the runner:
+	ended := make(chan struct{})
+
+	doneYielded := make(chan error)
+
+	s1 := service.New("", service.RunnableFunc(func(ctx service.Context) error {
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		go func() {
+			<-ended
+			<-ctx.Done()
+			close(doneYielded)
+		}()
+		return service.ErrServiceEnded
+	}))
+
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc.RunnerOptions()...)
+	ew := lc.EndWaiter(s1, 1)
+
+	tt.MustOK(r.Start(nil, s1, nil))
+	mustRecv(tt, ew.C(), dto)
+	close(ended)
+	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageRun, Err: service.ErrServiceEnded}}, lc.Ends(s1))
+
+	mustRecv(tt, doneYielded, dto)
 }
 
 func TestRunnerStartErrorBeforeReady(t *testing.T) {
@@ -182,7 +218,7 @@ func TestRunnerStartErrorBeforeReady(t *testing.T) {
 	tt.MustEqual(serr, cause(err))
 
 	// We must receive an 'end' via the listener.
-	mustRecv(tt, ew, dto)
+	mustRecv(tt, ew.C(), dto)
 	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageReady, Err: serr}}, lc.Ends(s1))
 }
 
@@ -197,7 +233,7 @@ func TestRunnerServiceEndsAfterReady(t *testing.T) {
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(service.StartTimeout(dto, r, s1))
-	mustRecv(tt, ew, dto)
+	mustRecv(tt, ew.C(), dto)
 	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageRun, Err: service.ErrServiceEnded}}, lc.Ends(s1))
 }
 
@@ -225,11 +261,11 @@ func TestRunnerStartServiceThenStartSecondAfterFirstEnds(t *testing.T) {
 	ew2 := lc.EndWaiter(s2, 1)
 
 	tt.MustOK(r.Start(nil, s1))
-	mustRecv(tt, ew1, dto) // unblocks when the first service ends
+	mustRecv(tt, ew1.C(), dto) // unblocks when the first service ends
 
 	tt.MustOK(r.Start(nil, s2))
 	tt.MustOK(service.HaltTimeout(dto, r, s2))
-	mustRecv(tt, ew2, dto)
+	mustRecv(tt, ew2.C(), dto)
 }
 
 func TestRunnerReadyTimeout(t *testing.T) {
@@ -263,7 +299,7 @@ func TestRunnerStartHaltWhileInStartDelay(t *testing.T) {
 
 	tt.MustEqual(service.StateChange{s1, service.Halted, service.Starting}, *sw1.Take(dto))
 	tt.MustOK(service.HaltTimeout(dto, r, s1))
-	mustRecv(tt, ew1, dto)
+	mustRecv(tt, ew1.C(), dto)
 
 	tt.MustAssert(r.State(s1) == service.Halted)
 }
@@ -309,8 +345,13 @@ func TestRunnerHaltDelay(t *testing.T) {
 	tt.MustAssert(time.Since(tm) > delay)
 }
 
-/*
 func TestRunnerHaltingState(t *testing.T) {
+	// This test attempts to catch a service in the act of 'halting' to ensure
+	// that the halting state is correctly reported.
+	//
+	// It does so by starting a service that takes a certain amount of time to
+	// halt, starting it, halting it, then polling its state.
+
 	tt := assert.WrapTB(t)
 
 	delay := 20 * tscale
@@ -320,33 +361,29 @@ func TestRunnerHaltingState(t *testing.T) {
 	tt.MustOK(service.StartTimeout(dto, r, s1))
 
 	var stop int32
-	var out = make(chan map[State]int)
+	var out = make(chan map[service.State]int)
 
 	tm := time.Now()
 
 	go func() {
-		counts := map[State]int{}
+		counts := map[service.State]int{}
 		for {
 			if atomic.LoadInt32(&stop) == 1 {
 				out <- counts
 				return
 			}
 			state := r.State(s1)
-			if err := r.service.AwaitSignalTimeout(dto, s1); err != nil {
-				panic(err)
-			}
 			counts[state]++
 			time.Sleep(tscale)
 		}
 	}()
-	tt.MustOK(service.HaltTimeout(dto,r, s1))
+	tt.MustOK(service.HaltTimeout(dto, r, s1))
 	tt.MustAssert(time.Since(tm) > delay)
 	tt.MustAssert(r.State(s1) == service.Halted)
 	atomic.StoreInt32(&stop, 1)
 	counts := <-out
-	tt.MustAssert(counts[Halting] > 0)
+	tt.MustAssert(counts[service.Halting] > 0)
 }
-*/
 
 func TestHaltableSleep(t *testing.T) {
 	tt := assert.WrapTB(t)
@@ -501,13 +538,10 @@ func TestRunnerServices(t *testing.T) {
 	}
 }
 
-/*
 func TestRunnerServiceFunc(t *testing.T) {
 	tt := assert.WrapTB(t)
 
-	ready := make(chan struct{})
 	s1 := service.New("", service.RunnableFunc(func(ctx service.Context) error {
-		<-ready
 		if err := ctx.Ready(); err != nil {
 			return err
 		}
@@ -515,15 +549,13 @@ func TestRunnerServiceFunc(t *testing.T) {
 		return nil
 	}))
 
-	r := service.NewRunner()
+	lc := NewListenerCollector()
+	r := service.NewRunner(lc.RunnerOptions()...)
 
-	panic("need to respond to state listen events")
-
+	sw1 := lc.StateWaiter(s1, 2)
 	tt.MustOK(r.Start(nil, s1))
-	tt.MustEqual(service.Starting, r.State(s1))
-	mustStateError(tt, r.Start(nil, s1), service.Halted, service.Starting)
-
-	close(ready)
+	tt.MustEqual(service.StateChange{s1, service.Halted, service.Starting}, *sw1.Take(dto))
+	tt.MustEqual(service.StateChange{s1, service.Starting, service.Started}, *sw1.Take(dto))
 
 	tt.MustOK(service.HaltTimeout(dto, r, s1))
 }
@@ -549,15 +581,21 @@ func TestRunnerServiceWithHaltingGoroutines(t *testing.T) {
 		return nil
 	}))
 
-	r := service.NewRunner()
+	lc := NewListenerCollector()
+	sw := lc.StateWaiter(s1, 2)
+	r := service.NewRunner(lc.RunnerOptions()...)
+	go func() {
+		if err := r.Start(nil, s1); err != nil {
+			panic(err)
+		}
+	}()
 
-	panic("need to respond to state listen events")
-
-	tt.MustOK(r.Start(nil, s1))
+	tt.MustEqual(service.StateChange{s1, service.Halted, service.Starting}, *sw.Take(dto))
 	tt.MustEqual(service.Starting, r.State(s1))
-	mustStateError(tt, r.Start(nil, s1), service.Halted, service.Starting)
-
 	close(ready)
+
+	tt.MustEqual(service.StateChange{s1, service.Starting, service.Started}, *sw.Take(dto))
+	tt.MustEqual(service.Started, r.State(s1))
 
 	tt.MustOK(service.HaltTimeout(dto, r, s1))
 
@@ -568,6 +606,7 @@ func TestRunnerServiceWithHaltingGoroutines(t *testing.T) {
 	}
 }
 
+/*
 func TestRunnerServiceWithHaltingGoroutinesOnEndError(t *testing.T) {
 	tt := assert.WrapTB(t)
 
@@ -636,37 +675,58 @@ func TestRunnerServiceEndedNotRetained(t *testing.T) {
 	ew := lc.EndWaiter(s1, 1)
 
 	tt.MustOK(r.Start(nil, s1))
-	mustRecv(tt, ew, dto)
+	mustRecv(tt, ew.C(), dto)
 	tt.MustEqual([]ListenerCollectorEnd{{Stage: service.StageRun, Err: service.ErrServiceEnded}}, lc.Ends(s1))
 
 	services := r.Services(service.AnyState, 0, nil)
 	tt.MustEqual(0, len(services))
 }
 
-/*
 func TestRunnerHaltWhileStarting(t *testing.T) {
 	// If we attempt to halt a service which is in the starting state, it should
 	// halt the service and wait until the halt is complete.
 
 	tt := assert.WrapTB(t)
 
-	startDelay := 10 * tscale
-	s1 := service.New("", (&BlockingService{StartDelay: startDelay}).Init())
+	ready := make(chan struct{})
+
+	s1 := service.New("test", service.RunnableFunc(func(ctx service.Context) error {
+		<-ready
+		if err := ctx.Ready(); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return nil
+	}))
+
 	lc := NewListenerCollector()
+	sw := lc.StateWaiter(s1, 2)
 	r := service.NewRunner(lc.RunnerOptions()...)
 
-	tt.MustOK(r.Start(nil, s1))
+	go func() {
+		if err := r.Start(nil, s1); err != nil {
+			panic(err)
+		}
+	}()
 
-	// FIXME: need a listener for state changes
-	tt.MustAssert(r.State(s1) == service.Starting)
+	tt.MustEqual(service.StateChange{s1, service.Halted, service.Starting}, *sw.Take(dto))
+	tt.MustEqual(service.Starting, r.State(s1))
 
-	tt.MustEqual(1, len(r.Services(service.AnyState, 0, nil)))
-	tt.MustOK(service.HaltTimeout(dto, r, s1))
-	tt.MustAssert(r.State(s1) == service.Halted)
+	hdone := make(chan error, 2)
+	go func() { hdone <- r.Halt(nil, s1) }()
+	go func() { hdone <- r.Halt(nil, s1) }()
+
+	tt.MustEqual(service.StateChange{s1, service.Starting, service.Halting}, *sw.Take(dto))
+	close(ready)
+
+	tt.MustOK(<-hdone)
+	s := time.Now()
+	tt.MustOK(<-hdone)
+	d := time.Since(s)
+	tt.MustAssert(d < 1*time.Millisecond) // FIXME: Brittle timing test
 
 	tt.MustEqual(0, len(r.Services(service.AnyState, 0, nil)))
 }
-*/
 
 func TestRunnerHaltWhileHalting(t *testing.T) {
 	// If we attempt to halt a service which is in the halting state, it should

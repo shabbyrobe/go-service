@@ -35,7 +35,7 @@ func TestRunnerFuzzHappy(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		StateCheckChance: 0.2,
+		StateCheckChance: 0.05,
 
 		Stats: stats,
 	})
@@ -82,7 +82,7 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 		ServiceHaltDelay:   TimeRange{0, 0},
 		ServiceHaltTimeout: TimeRange{10 * time.Second, 10 * time.Second},
 
-		StateCheckChance: 0,
+		StateCheckChance: 0.0,
 
 		Stats: stats,
 	})

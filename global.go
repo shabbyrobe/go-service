@@ -28,20 +28,20 @@ func globalOnErrorFn(stage Stage, service *Service, err error) {
 	}
 }
 
-func GlobalRunner() (r Runner) {
+func Global() (r Runner) {
 	globalMu.RLock()
 	r = globalRunner
 	globalMu.RUnlock()
 	return r
 }
 
-func GlobalRunnerOnEnd(cb OnEnd) {
+func GlobalOnEnd(cb OnEnd) {
 	globalRunner.mu.Lock()
 	globalRunner.onEnd = cb
 	globalRunner.mu.Unlock()
 }
 
-func GlobalRunnerOnError(cb OnError) {
+func GlobalOnError(cb OnError) {
 	globalRunner.mu.Lock()
 	globalRunner.onError = cb
 	globalRunner.mu.Unlock()

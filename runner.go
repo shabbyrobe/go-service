@@ -103,7 +103,6 @@ type runner struct {
 	state    RunnerState
 
 	mu sync.RWMutex
-	// mu synctools.LoggingRWMutex
 }
 
 var _ Runner = &runner{}
@@ -150,11 +149,6 @@ func (rn *runner) Shutdown(ctx context.Context) (rerr error) {
 	if err := func() error {
 		rn.mu.Lock()
 		defer rn.mu.Unlock()
-
-		if rn.state != RunnerEnabled && rn.state != RunnerSuspended {
-			// FIXME: error that allows you to check if it's suspended or shut down:
-			return fmt.Errorf("runner is not enabled")
-		}
 
 		signal = NewMultiSignal(len(rn.services))
 
@@ -205,12 +199,16 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 
 	for _, svc := range services {
 		if svc == nil || svc.Runnable == nil {
+			// FIXME: if Done() is false, is this is a problem we need to handle or the
+			// owner of the signal's problem?
 			ready.Done(nil)
 			continue
 		}
 
 		rs := rn.services[svc]
 		if rs != nil {
+			// FIXME: if Done() is false, is this is a problem we need to handle or the
+			// owner of the signal's problem?
 			ready.Done(errAlreadyRunning(1))
 			continue
 		}
@@ -220,6 +218,8 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 		rn.services[svc] = rs
 
 		if err := rs.starting(ctx); err != nil {
+			// FIXME: if Done() is false, is this is a problem we need to handle or the
+			// owner of the signal's problem?
 			ready.Done(err)
 			continue
 		}
@@ -266,6 +266,8 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 	for _, svc := range services {
 		rs := rn.services[svc]
 		if rs == nil {
+			// FIXME: if Done() is false, is this is a problem we need to handle or the
+			// owner of the signal's problem?
 			done.Done(nil)
 			continue
 		}
@@ -357,8 +359,12 @@ func (rn *runner) ended(rsvc *runnerService, err error) error {
 	delete(rn.services, rsvc.service)
 
 	rsvc.mu.Lock()
+	if rsvc.state != Halting {
+		close(rsvc.halt)
+	}
+
 	rsvc.setState(Ended)
-	rsvc.done = nil
+	rsvc.done = closedBlank
 
 	// This is a strange looking bit of code; we have to separate
 	// "ready errors" from "halt errors".

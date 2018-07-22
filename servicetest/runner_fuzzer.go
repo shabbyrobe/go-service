@@ -10,9 +10,6 @@ import (
 
 	service "github.com/shabbyrobe/go-service"
 	"github.com/shabbyrobe/golib/assert"
-
-	"github.com/shabbyrobe/golib/iotools"
-	"github.com/shabbyrobe/golib/synctools"
 	// "github.com/shabbyrobe/golib/synctools"
 )
 
@@ -49,8 +46,14 @@ type RunnerFuzzer struct {
 	// Chance that a service started by the fuzzer will be restartable.
 	ServiceRestartableChance float64
 
-	ServiceStartTime   TimeRange
-	StartWaitTimeout   TimeRange
+	// The amount of time the service will take before it calls ctx.Ready().
+	ServiceStartTime TimeRange
+
+	// The amount of time the fuzzer will wait for the service to start. If
+	// this is shorter than ServiceStartTime, the fuzzer will experience start
+	// failures.
+	StartWaitTimeout TimeRange
+
 	ServiceRunTime     TimeRange
 	ServiceHaltAfter   TimeRange
 	ServiceHaltDelay   TimeRange
@@ -274,13 +277,6 @@ func (r *RunnerFuzzer) Init(tt assert.T) {
 }
 
 func (r *RunnerFuzzer) Run(tt assert.T) {
-	f, err := os.Create("/tmp/log")
-	if err != nil {
-		panic(err)
-	}
-	synctools.LoggingMutexWriter = iotools.NewLockedWriter(f)
-	defer f.Close()
-
 	tt.Helper()
 
 	// stats start must be called before r.Init() because it resets the runner count

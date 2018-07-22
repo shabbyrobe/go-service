@@ -155,7 +155,7 @@ func (ms *multiSignal) Waiter() <-chan error {
 	defer ms.lock.Unlock()
 
 	if ms.done {
-		return closed
+		return closedErr
 	}
 
 	c := make(chan error, 1)
