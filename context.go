@@ -65,11 +65,14 @@ type Context interface {
 	// service to halt prematurely up to the runner's listener.
 	OnError(err error)
 
+	// Runner allows you to access the Runner from which the invocation of
+	// Run() originated. This lets you start child services in the same runner.
+	// It is safe to call any method of this from inside a Runnable.
 	Runner() Runner
 }
 
-// Sleep allows a service to perform an interruptible sleep - it will
-// return early if the service is halted.
+// Sleep allows a Runnable to perform an interruptible sleep - it will return
+// early if the Service is halted.
 func Sleep(ctx Context, d time.Duration) (halted bool) {
 	// MinHaltableSleep is a performance hack. It's probably not a
 	// one-size-fits all constant but it'll do for now.
