@@ -1,17 +1,18 @@
-// +build ignore
-
-// FIXME: still stuck to v1's API
-
 package serviceutil
 
 import (
-	"sync"
+	"fmt"
 	"sync/atomic"
 	"time"
 
-	"github.com/pkg/errors"
 	service "github.com/shabbyrobe/go-service"
 )
+
+type WaitCalc func() time.Duration
+
+func WaitFixed(d time.Duration) WaitCalc {
+	return func() time.Duration { return d }
+}
 
 // TimedRestart is an experimental service.Wrapper that restarts a service that
 // ends prematurely after a specific interval.
@@ -23,44 +24,54 @@ import (
 // there's no way to catch lockups caused by services that don't halt properly.
 //
 type TimedRestart struct {
-	service  service.Service
-	limit    int
-	timeout  time.Duration
-	wait     time.Duration
-	listener TimedRestartListener
-	running  uint32
-	starts   uint64
+	runnable service.Runnable
 
+	limit   uint64
+	timeout time.Duration
+	wait    WaitCalc
+	running uint32
+	starts  uint64
+
+	suspend   chan struct{}
 	suspended int32
-	suspend   *sync.Cond
-	ctx       service.RunContext
-	lock      sync.Mutex
+
+	onRestart func(start uint64, err error)
 }
 
-type TimedRestartListener interface {
-	OnTimedRestartReady(start int)
-	OnTimedRestartError(start int, err error)
+type TimedRestartOption func(tr *TimedRestart)
+
+func TimedRestartActive(active bool) TimedRestartOption {
+	return func(tr *TimedRestart) {
+		if !active {
+			tr.suspended = 1
+		}
+	}
+}
+
+func TimedRestartLimit(limit uint64) TimedRestartOption {
+	return func(tr *TimedRestart) { tr.limit = limit }
+}
+
+func TimedRestartOnRestart(r func(start uint64, err error)) TimedRestartOption {
+	return func(tr *TimedRestart) { tr.onRestart = r }
 }
 
 // NewTimedRestart creates a TimedRestart service. If you want to log errors,
 // pass in a listener, otherwise pass nil.
-func NewTimedRestart(svc service.Service, timeout, wait time.Duration,
-	listener TimedRestartListener, active bool) *TimedRestart {
-
-	if svc == nil {
-		panic("service was nil")
+func NewTimedRestart(runnable service.Runnable, timeout time.Duration, wait WaitCalc, options ...TimedRestartOption) *TimedRestart {
+	if runnable == nil {
+		panic("runnable was nil")
 	}
 
 	tr := &TimedRestart{
-		service:  svc,
+		runnable: runnable,
 		timeout:  timeout,
 		wait:     wait,
-		listener: listener,
+		suspend:  make(chan struct{}, 1),
 	}
-	if !active {
-		tr.suspended = 1
+	for _, o := range options {
+		o(tr)
 	}
-	tr.suspend = sync.NewCond(&tr.lock)
 	return tr
 }
 
@@ -68,16 +79,8 @@ func (t *TimedRestart) Running() bool         { return atomic.LoadUint32(&t.runn
 func (t *TimedRestart) Starts() uint64        { return atomic.LoadUint64(&t.starts) }
 func (t *TimedRestart) Suspended() (out bool) { return atomic.LoadInt32(&t.suspended) == 1 }
 
-func (t *TimedRestart) ServiceName() service.Name { return t.service.ServiceName() }
-
 // Suspend instructs the service to halt and to not restart.
-// Developers note: this function should return quickly, not wait
-// for Halt as there are things that depend on this that must not
-// be blocked.
 func (t *TimedRestart) Suspend(suspended bool) (changed bool) {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
 	var sv int32
 	if suspended {
 		sv = 1
@@ -87,29 +90,15 @@ func (t *TimedRestart) Suspend(suspended bool) (changed bool) {
 		return false
 	}
 
-	if suspended == true {
-		if t.ctx != nil {
-			// RunContext.Halt() does little more than close the done channel,
-			// it doesn't wait until the service has actually halted.
-			t.ctx.Halt()
-			t.ctx = nil
-		}
-	} else {
-		t.suspend.Broadcast()
-	}
+	t.suspend <- struct{}{}
 
 	return true
 }
 
-func (t *TimedRestart) suspendedWait() {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	for atomic.LoadInt32(&t.suspended) == 1 {
-		t.suspend.Wait()
-	}
-}
-
 func (t *TimedRestart) Run(ctx service.Context) error {
+	failer := service.NewFailureListener(1)
+	runner := service.NewRunner(failer.ForRunner())
+
 	// This is an interesting one. If the service fails to start first go,
 	// we can't exactly say we're "ready", but we can't hold everything
 	// else up waiting for this thing's restart to finally succeed.
@@ -130,80 +119,52 @@ func (t *TimedRestart) Run(ctx service.Context) error {
 		return nil
 	}
 
-	ender := service.NewEndListener(1)
-
-	contexts := make(chan timedRun, 1)
-
-	go func() {
-		for {
-			run, ok := <-contexts
-			if !ok {
-				return
-			}
-
-			t.lock.Lock()
-			t.ctx = run.rctx
-			t.lock.Unlock()
-
-			t.suspendedWait()
-
-			atomic.StoreUint32(&t.running, 1)
-			atomic.AddUint64(&t.starts, 1)
-			err := t.service.Run(run.rctx)
-			atomic.StoreUint32(&t.running, 0)
-			ender.Send(err)
-
-			// it's bad whether or not it's nil:
-			if t.listener != nil {
-				t.listener.OnTimedRestartError(run.start, errors.Wrap(err, "timed restart ended"))
-			}
-		}
-	}()
-
-	var rctx service.RunContext
-	var failures = 0
-	var start = 0
-	defer func() {
-		if rctx != nil {
-			rctx.Halt()
-		}
-		close(contexts)
-	}()
+	svc := service.New("", t.runnable)
+	defer service.MustHaltTimeout(t.timeout, runner, svc)
 
 	for {
-		start++
-		curStart := start
-		rctx = service.Standalone().WhenReady(func(svc service.Service) error {
-			if t.listener != nil {
-				go t.listener.OnTimedRestartReady(curStart)
-			}
-			return nil
-		})
-
-		contexts <- timedRun{start: curStart, rctx: rctx}
-
-		select {
-		case err := <-ender.Ends():
-			failures++
-			if t.limit > 0 && failures >= t.limit {
-				t.listener.OnTimedRestartError(curStart, errors.Wrap(err, "timed restart failed"))
-				return err
-			}
-			if halted := service.Sleep(ctx, t.wait); halted {
-				// Watch out, I nearly missed a bug here where service.Sleep() didn't
-				// properly check if the sleep was halted by ctx.Done() being tripped.
-				// If I let that one slip through, this loop would've gone around for
-				// another restart if you tried to halt while it was sleeping!
+		// Wait for suspended to be false:
+		for atomic.LoadInt32(&t.suspended) == 1 {
+			select {
+			case <-t.suspend:
+			case <-ctx.Done():
 				return nil
 			}
+		}
 
-		case <-ctx.Done():
+		start := atomic.AddUint64(&t.starts, 1)
+		err := runner.Start(ctx, svc)
+		if err != nil {
+			goto failure
+		}
+		atomic.StoreUint32(&t.running, 1)
+
+		for atomic.LoadInt32(&t.suspended) == 0 {
+			select {
+			case <-t.suspend:
+			case <-ctx.Done():
+				return nil
+			case err = <-failer.Failures():
+				goto failure
+			}
+		}
+
+		service.MustHaltTimeout(t.timeout, runner, svc)
+
+	failure:
+		atomic.StoreUint32(&t.running, 0)
+
+		if t.onRestart != nil {
+			t.onRestart(start, err)
+		}
+
+		if t.limit > 0 && start >= t.limit {
+			return fmt.Errorf("retry limit exceeded")
+		}
+
+		wait := t.wait()
+		if halted := service.Sleep(ctx, wait); halted {
 			return nil
 		}
 	}
-}
-
-type timedRun struct {
-	start int
-	rctx  service.RunContext
 }
