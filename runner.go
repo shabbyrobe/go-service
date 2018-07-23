@@ -268,8 +268,10 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 	select {
 	case err := <-ready.Waiter():
 		errs = append(errs, Errors(err)...)
-		if len(errs) > 0 {
+		if len(errs) > 1 {
 			return &serviceErrors{errors: errs}
+		} else if len(errs) == 1 {
+			return errs[0]
 		}
 		return nil
 
@@ -314,8 +316,10 @@ func (rn *runner) Halt(ctx context.Context, services ...*Service) (rerr error) {
 	select {
 	case err := <-done.Waiter():
 		errs = append(errs, Errors(err)...)
-		if len(errs) > 0 {
+		if len(errs) > 1 {
 			return &serviceErrors{errors: errs}
+		} else if len(errs) == 1 {
+			return errs[0]
 		}
 		return nil
 

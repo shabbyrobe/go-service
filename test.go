@@ -4,6 +4,8 @@
 // to the right test, set coverpkg properly and collect coverage for all tests
 // into a single report.
 //
+// To run, you will need to run 'go get github.com/shabbyrobe/gocovmerge'.
+//
 // Pass arguments to test binaries after a '--':
 //
 //   go run test.go -- -v -service.fuzz=true
@@ -30,8 +32,9 @@ import (
 )
 
 type testPkg struct {
-	pkg  string
-	args []string
+	pkg   string
+	args  []string
+	cover []string
 }
 
 func main() {
@@ -42,19 +45,38 @@ func main() {
 
 func run() error {
 	var (
-		coverProfile  string
-		coverPackages []string
+		coverProfile string
 	)
 
 	flag.StringVar(&coverProfile, "cover", "", "coverage profile file")
 	flag.Parse()
 
-	coverPkgArg := "-coverpkg=github.com/shabbyrobe/go-service"
 	pkgs := []testPkg{
 		{pkg: "github.com/shabbyrobe/go-service"},
 
-		{pkg: "github.com/shabbyrobe/go-service/servicetest", args: []string{coverPkgArg}},
-		{pkg: "github.com/shabbyrobe/go-service/serviceutil", args: []string{coverPkgArg}},
+		{
+			pkg: "github.com/shabbyrobe/go-service/servicetest",
+			cover: []string{
+				"github.com/shabbyrobe/go-service",
+				"github.com/shabbyrobe/go-service/services",
+				"github.com/shabbyrobe/go-service/serviceutil",
+				"github.com/shabbyrobe/go-service/signal",
+			},
+		},
+		{
+			pkg: "github.com/shabbyrobe/go-service/services",
+			cover: []string{
+				"github.com/shabbyrobe/go-service",
+				"github.com/shabbyrobe/go-service/services",
+			},
+		},
+		{
+			pkg: "github.com/shabbyrobe/go-service/serviceutil",
+			cover: []string{
+				"github.com/shabbyrobe/go-service",
+				"github.com/shabbyrobe/go-service/serviceutil",
+			},
+		},
 	}
 
 	var cleanFiles []string
@@ -63,10 +85,6 @@ func run() error {
 			os.Remove(f)
 		}
 	}()
-
-	for _, pkg := range pkgs {
-		coverPackages = append(coverPackages, pkg.pkg)
-	}
 
 	// set aside fuzzer arguments. has the undesirable side effect of forcing
 	// all passed-through flags to use '=' to separate flag and value.
@@ -94,8 +112,12 @@ func run() error {
 		}
 
 		pargs = append(pargs, pkg.pkg)
-
 		pargs = append(pargs, pkg.args...)
+
+		if len(pkg.cover) > 0 {
+			coverPkgArg := "-coverpkg=" + strings.Join(pkg.cover, ",")
+			pargs = append(pargs, coverPkgArg)
+		}
 		pargs = append(pargs, args...)
 
 		if pkg.pkg == "github.com/shabbyrobe/go-service/servicetest" {

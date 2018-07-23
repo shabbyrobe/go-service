@@ -8,20 +8,21 @@ import (
 	service "github.com/shabbyrobe/go-service"
 )
 
+var errRestartLimitExceeded = fmt.Errorf("service: timed restart limit exceeded")
+
 type WaitCalc func() time.Duration
 
 func WaitFixed(d time.Duration) WaitCalc {
 	return func() time.Duration { return d }
 }
 
-// TimedRestart is an experimental service.Wrapper that restarts a service that
-// ends prematurely after a specific interval.
+// TimedRestart is an experimental service.Runnable that wraps your service and
+// restarts it if it ends prematurely after a specific interval.
 //
 // It's intended to prototype a method for retrying failed connections or
 // subprocesses.
 //
-// The big problem with this approach is the use of service.Standalone() -
-// there's no way to catch lockups caused by services that don't halt properly.
+// The "Suspend" function may not work as desired; more testing is required.
 //
 type TimedRestart struct {
 	runnable service.Runnable
@@ -52,7 +53,7 @@ func TimedRestartLimit(limit uint64) TimedRestartOption {
 	return func(tr *TimedRestart) { tr.limit = limit }
 }
 
-func TimedRestartOnRestart(r func(start uint64, err error)) TimedRestartOption {
+func TimedRestartNotify(r func(start uint64, err error)) TimedRestartOption {
 	return func(tr *TimedRestart) { tr.onRestart = r }
 }
 
@@ -90,7 +91,10 @@ func (t *TimedRestart) Suspend(suspended bool) (changed bool) {
 		return false
 	}
 
-	t.suspend <- struct{}{}
+	select {
+	case t.suspend <- struct{}{}:
+	default:
+	}
 
 	return true
 }
@@ -121,6 +125,7 @@ func (t *TimedRestart) Run(ctx service.Context) error {
 
 	svc := service.New("", t.runnable)
 	defer service.MustHaltTimeout(t.timeout, runner, svc)
+	defer atomic.StoreUint32(&t.running, 0)
 
 	for {
 		// Wait for suspended to be false:
@@ -159,7 +164,7 @@ func (t *TimedRestart) Run(ctx service.Context) error {
 		}
 
 		if t.limit > 0 && start >= t.limit {
-			return fmt.Errorf("retry limit exceeded")
+			return errRestartLimitExceeded
 		}
 
 		wait := t.wait()
@@ -167,4 +172,8 @@ func (t *TimedRestart) Run(ctx service.Context) error {
 			return nil
 		}
 	}
+}
+
+func IsRestartLimitExceeded(err error) bool {
+	return err == errRestartLimitExceeded
 }

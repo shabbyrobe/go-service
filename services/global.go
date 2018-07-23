@@ -39,16 +39,20 @@ func Runner() (r service.Runner) {
 	return r
 }
 
-func OnEnd(cb service.OnEnd) {
+func OnEnd(cb service.OnEnd) (old service.OnEnd) {
 	globalMu.Lock()
+	old = globalOnEnd
 	globalOnEnd = cb
 	globalMu.Unlock()
+	return old
 }
 
-func OnError(cb service.OnError) {
+func OnError(cb service.OnError) (old service.OnError) {
 	globalMu.Lock()
+	old = globalOnError
 	globalOnError = cb
 	globalMu.Unlock()
+	return old
 }
 
 // GlobalReset is used to replace the global runner with a fresh one. The
@@ -58,9 +62,10 @@ func OnError(cb service.OnError) {
 // ctx may be nil.
 func Reset(ctx context.Context) {
 	globalMu.Lock()
+	defer globalMu.Unlock()
+
 	if globalRunner != nil {
 		if err := globalRunner.Shutdown(ctx); err != nil {
-			globalMu.Unlock()
 			panic(err)
 		}
 	}
@@ -68,5 +73,4 @@ func Reset(ctx context.Context) {
 		service.RunnerOnEnd(globalOnEndFn),
 		service.RunnerOnError(globalOnErrorFn),
 	)
-	globalMu.Unlock()
 }
