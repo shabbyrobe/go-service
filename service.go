@@ -45,6 +45,11 @@ type Endable interface {
 	AttachEnd(svc *Service)
 }
 
+func (s *Service) WithOnEnd(onEnd OnEnd) *Service {
+	s.OnEnd = onEnd
+	return s
+}
+
 func (s *Service) WithEndListener(endable Endable) *Service {
 	endable.AttachEnd(s)
 	return s
