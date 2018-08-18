@@ -102,7 +102,12 @@ func (h *HTTP) Run(ctx service.Context) (rerr error) {
 			return
 		}
 
-		failer.SendNonNil(h.Server.Serve(tcpKeepAliveListener{TCPListener: ln.(*net.TCPListener)}))
+		keep := tcpKeepAliveListener{TCPListener: ln.(*net.TCPListener)}
+		if h.Server.TLSConfig != nil {
+			failer.SendNonNil(h.Server.ServeTLS(keep, "", ""))
+		} else {
+			failer.SendNonNil(h.Server.Serve(keep))
+		}
 	}()
 
 	defer func() {
