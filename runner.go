@@ -214,9 +214,7 @@ func (rn *runner) Start(ctx context.Context, services ...*Service) error {
 	rn.mu.Lock()
 	if rn.state != RunnerEnabled {
 		rn.mu.Unlock()
-
-		// FIXME: error that allows you to check if it's suspended or shut down:
-		return fmt.Errorf("runner is not enabled")
+		return errRunnerNotEnabled(0)
 	}
 
 	ready := signal.NewSignal(svcLen)
