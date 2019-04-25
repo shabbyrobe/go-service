@@ -73,7 +73,7 @@ type Context interface {
 
 // Sleep allows a Runnable to perform an interruptible sleep - it will return
 // early if the Service is halted.
-func Sleep(ctx Context, d time.Duration) (halted bool) {
+func Sleep(ctx context.Context, d time.Duration) (halted bool) {
 	// MinHaltableSleep is a performance hack. It's probably not a
 	// one-size-fits all constant but it'll do for now.
 	if d < MinHaltableSleep {
