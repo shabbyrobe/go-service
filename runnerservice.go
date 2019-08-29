@@ -65,9 +65,9 @@ func (rs *runnerService) starting(ctx context.Context) error {
 
 	rs.startCtx = ctx
 	if ctx != nil {
-		cd := ctx.Done()
-		if cd != nil {
-			rs.joinedDone = joinDone(rs.halt, cd)
+		doneChan := ctx.Done()
+		if doneChan != nil {
+			rs.joinedDone = joinDone(rs.halt, doneChan)
 			rs.done = rs.joinedDone.out
 		}
 	}

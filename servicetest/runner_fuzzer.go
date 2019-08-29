@@ -21,8 +21,6 @@ type RunnerFuzzer struct {
 	RunnerLimit  int
 	ServiceLimit int
 
-	SyncHalt bool
-
 	RunnerCreateChance float64
 
 	// This is a wonderful mess-maker. It will attempt, in a goroutine,
@@ -300,6 +298,9 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 	if r.ServiceHaltTimeout.Max > wait {
 		wait = r.ServiceHaltTimeout.Max
 	}
+	if wait < 1*time.Second {
+		wait = 1 * time.Second
+	}
 
 	{ // wait for goroutines
 		doneGo := make(chan struct{})
@@ -308,7 +309,7 @@ func (r *RunnerFuzzer) Run(tt assert.T) {
 			close(doneGo)
 		}()
 
-		after := time.After(wait * 2)
+		after := time.After(wait * 10)
 		select {
 		case <-after:
 			pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)

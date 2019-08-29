@@ -1,4 +1,4 @@
-// +build ignore
+// +build tools
 
 // This is a fairly crummy test runner that tries to hackily dispatch arguments
 // to the right test, set coverpkg properly and collect coverage for all tests

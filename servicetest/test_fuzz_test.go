@@ -16,7 +16,6 @@ func TestRunnerFuzzHappy(t *testing.T) {
 	stats := NewFuzzStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		SyncHalt:           true,
 		RunnerCreateChance: 0.0,
 		RunnerHaltChance:   0.0,
 
@@ -61,7 +60,6 @@ func TestRunnerFuzzHappyLowLimitHighTurnover(t *testing.T) {
 	stats := NewFuzzStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		SyncHalt:           true,
 		RunnerCreateChance: 0.0,
 		RunnerHaltChance:   0.0,
 		RunnerLimit:        1,
@@ -100,7 +98,6 @@ func TestRunnerFuzzReasonable(t *testing.T) {
 	stats := NewFuzzStats()
 	testFuzz(t, &RunnerFuzzer{
 		Tick:               time.Duration(fuzzTickNsec),
-		SyncHalt:           true,
 		RunnerCreateChance: 0.001,
 		RunnerHaltChance:   0.0,
 

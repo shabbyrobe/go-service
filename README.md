@@ -168,7 +168,7 @@ When using the fuzz tester, it is a good idea to pass `-v` as well.
 
 This will fuzz for 10 minutes and print the results:
 
-    go run test.go -- -v -service.fuzz=true -service.fuzztime=600
+    go run test.go -- -v -service.fuzz=true -service.fuzztime=600s
 
 This will fuzz for 10 seconds, but will only make a randomised decision every
 10ms (this is useful to get more contained tests with fewer things happening to
