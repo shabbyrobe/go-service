@@ -9,8 +9,7 @@ import (
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/golib/assert"
-	// "github.com/shabbyrobe/golib/synctools"
+	"github.com/shabbyrobe/go-service/internal/assert"
 )
 
 type RunnerFuzzer struct {

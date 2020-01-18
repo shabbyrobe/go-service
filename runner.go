@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/shabbyrobe/go-service/signal"
-	// "github.com/shabbyrobe/golib/synctools"
 )
 
 // Runner Starts, Halts and manages Services.

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
-	"github.com/shabbyrobe/golib/assert"
+	"github.com/shabbyrobe/go-service/internal/assert"
 )
 
 // TODO:

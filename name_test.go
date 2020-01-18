@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/shabbyrobe/golib/assert"
+	"github.com/shabbyrobe/go-service/internal/assert"
 )
 
 func TestNameAppend(t *testing.T) {

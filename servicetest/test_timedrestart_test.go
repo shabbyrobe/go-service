@@ -6,8 +6,8 @@ import (
 	"time"
 
 	service "github.com/shabbyrobe/go-service"
+	"github.com/shabbyrobe/go-service/internal/assert"
 	"github.com/shabbyrobe/go-service/serviceutil"
-	"github.com/shabbyrobe/golib/assert"
 )
 
 func TestTimedRestart_Restart(t *testing.T) {

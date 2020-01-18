@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shabbyrobe/golib/assert"
+	"github.com/shabbyrobe/go-service/internal/assert"
 )
 
 func TestRunnerFuzzHappy(t *testing.T) {
