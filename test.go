@@ -102,7 +102,7 @@ func run() error {
 	var profiles []*cover.Profile
 
 	for _, pkg := range pkgs {
-		pargs := []string{"test"}
+		pargs := []string{"test", "-count", "1"}
 
 		var tmpProfile string
 		if coverProfile != "" {
