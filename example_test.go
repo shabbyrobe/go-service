@@ -58,7 +58,6 @@ func Example() {
 	select {
 	case s := <-msg:
 		fmt.Println(s)
-		panic(nil)
 
 		// Halt a service and wait for it to signal it finished:
 		if err := runner.Halt(context.TODO(), svc); err != nil {
