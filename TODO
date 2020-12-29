@@ -10,3 +10,6 @@
   the average run time of a service does not match the bounds established by
   the randomised times.
 
+- The goroutine running the service doesn't stop until after onEnd is called.
+  This means we can't reasonably control the number of in-flight goroutines
+  while testing with the race detector using the current method.
