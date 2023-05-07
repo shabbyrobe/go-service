@@ -1,3 +1,9 @@
+**NOTE: This is deprecated. I no longer use it regularly, I typically just use
+some combination of contexts, errgroups, or some small-sclae roll-your-own thing.
+Not idea, but neither's maintaining something I don't have time for any more.**
+
+---
+
 Goroutine lifecycle management: service
 =======================================
 

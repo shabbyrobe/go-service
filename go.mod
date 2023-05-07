@@ -1,3 +1,5 @@
+// Deprecated: This is no longer maintained.
+
 module github.com/shabbyrobe/go-service
 
 go 1.12
